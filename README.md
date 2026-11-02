@@ -57,7 +57,6 @@
 ```bash
 git clone https://github.com/DIluo1549/TagNest.git
 cd tagnest
-cp .env.example .env        # 可选：设置密码和端口
 # 编辑 docker-compose.yml，把 /volume1/music 改成你的 NAS 音乐目录
 docker compose up -d --build
 ```
