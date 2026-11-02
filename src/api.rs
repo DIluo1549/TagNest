@@ -682,7 +682,7 @@ async fn apply_lyrics(
     }
     let bilingual = body.bilingual.unwrap_or(config.lyrics.bilingual);
     let embed = body.embed.unwrap_or(config.lyrics.embed);
-    let write_file = body.write_file.unwrap_or(true);
+    let write_file = body.write_file.unwrap_or(config.lyrics.write_file);
     if !write_file && !embed {
         return Err(ApiError::bad("不新建歌词文件时，必须选择嵌入音频标签"));
     }
@@ -733,7 +733,7 @@ async fn batch_lyrics(
     let config = state.config();
     let bilingual = body.bilingual.unwrap_or(config.lyrics.bilingual);
     let embed = body.embed.unwrap_or(config.lyrics.embed);
-    let write_file = body.write_file.unwrap_or(true);
+    let write_file = body.write_file.unwrap_or(config.lyrics.write_file);
     if !write_file && !embed {
         return Err(ApiError::bad("不新建歌词文件时，必须选择嵌入音频标签"));
     }
@@ -936,6 +936,8 @@ struct AutoScrapeRequest {
     cover: Option<bool>,
     #[serde(default)]
     sources: Vec<String>,
+    #[serde(default)]
+    fields: Vec<String>,
 }
 
 async fn auto_scrape(
@@ -956,6 +958,16 @@ async fn auto_scrape(
         None
     } else {
         Some(body.sources.as_slice())
+    };
+    let fields = if body.fields.is_empty() {
+        None
+    } else {
+        Some(
+            body.fields
+                .iter()
+                .map(String::as_str)
+                .collect::<HashSet<_>>(),
+        )
     };
     let mut results = Vec::new();
     let mut updated = 0usize;
@@ -998,7 +1010,7 @@ async fn auto_scrape(
         } else {
             None
         };
-        merge_candidate(&mut track, &candidate, overwrite, None, &config);
+        merge_candidate(&mut track, &candidate, overwrite, fields.clone(), &config);
         track.updated_at = now_secs();
         let extra = WriteOptionsExtra {
             cover,
@@ -1511,13 +1523,32 @@ async fn update_settings(
 
 async fn get_providers(State(state): State<AppState>) -> Json<Value> {
     let config = state.config();
-    Json(json!([
-        {"id":"musicbrainz","name":"MusicBrainz","kind":"metadata","enabled":config.providers.musicbrainz,"endpoint":config.endpoints.musicbrainz,"note":"开放元数据，含 MusicBrainz ID"},
-        {"id":"itunes","name":"iTunes / Apple Music","kind":"metadata","enabled":config.providers.itunes,"endpoint":config.endpoints.itunes,"note":"封面与曲目信息，支持中国区"},
-        {"id":"deezer","name":"Deezer","kind":"metadata","enabled":config.providers.deezer,"endpoint":config.endpoints.deezer,"note":"欧洲曲库，补充匹配"},
-        {"id":"netease","name":"网易云音乐","kind":"metadata+lyrics","enabled":config.providers.netease,"endpoint":config.endpoints.netease,"note":"元数据、封面、中文歌词与翻译"},
-        {"id":"lrclib","name":"LRCLIB","kind":"lyrics","enabled":config.providers.lrclib,"endpoint":config.endpoints.lrclib,"note":"开源同步歌词库"},
-    ]))
+    let items = config
+        .sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            let metadata = crate::config::adapter_metadata(&source.adapter);
+            let lyrics = crate::config::adapter_lyrics(&source.adapter);
+            let kind = if metadata && lyrics {
+                "metadata+lyrics"
+            } else if metadata {
+                "metadata"
+            } else {
+                "lyrics"
+            };
+            json!({
+                "id": source.id,
+                "name": source.name,
+                "adapter": source.adapter,
+                "kind": kind,
+                "enabled": source.enabled,
+                "endpoint": source.base_url,
+                "priority": index,
+            })
+        })
+        .collect::<Vec<_>>();
+    Json(Value::Array(items))
 }
 
 async fn naming_variables() -> Json<Value> {

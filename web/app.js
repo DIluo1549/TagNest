@@ -13,6 +13,13 @@ function escapeHtml(value) {
   }[ch]));
 }
 
+function applyTheme(theme) {
+  const value = ['emerald', 'ocean', 'violet', 'light'].includes(theme) ? theme : 'emerald';
+  document.documentElement.dataset.theme = value;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', value === 'light' ? '#f2f5f3' : '#080b10');
+}
+
 function icon(name) {
   return `<svg class="icon" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
 }
@@ -93,6 +100,7 @@ const state = {
   selected: new Set(),
   stats: null,
   settings: null,
+  providers: [],
   settingsDirty: false,
   scan: null,
   scanWasRunning: false,
@@ -224,7 +232,7 @@ function showApp() {
 }
 
 async function bootData() {
-  await Promise.all([loadSettings(), loadNaming()]);
+  await Promise.all([loadSettings(), loadNaming(), loadProviders()]);
   await Promise.all([loadStats(), loadTracks()]);
   await refreshScanStatus();
   if (!state.pollHandle) {
@@ -298,6 +306,14 @@ async function loadSettings() {
   populateSettings();
 }
 
+async function loadProviders() {
+  try {
+    state.providers = await api('/api/providers');
+  } catch (error) {
+    console.warn(error);
+  }
+}
+
 function populateSettings() {
   if (!state.settings) return;
   const config = state.settings.config;
@@ -320,20 +336,16 @@ function populateSettings() {
   if ($('#rename-artist-separator') && !$('#rename-artist-separator').value) {
     $('#rename-artist-separator').value = config.naming_artist_separator || '';
   }
+  $('#theme-select').value = config.theme || 'emerald';
+  applyTheme(config.theme || 'emerald');
   $('#lyrics-bilingual').checked = !!config.lyrics.bilingual;
   $('#lyrics-embed').checked = !!config.lyrics.embed;
   $('#lyrics-synced').checked = !!config.lyrics.prefer_synced;
   $('#lyrics-overwrite').checked = !!config.lyrics.overwrite;
-  $('#p-musicbrainz').checked = !!config.providers.musicbrainz;
-  $('#p-itunes').checked = !!config.providers.itunes;
-  $('#p-deezer').checked = !!config.providers.deezer;
-  $('#p-lrclib').checked = !!config.providers.lrclib;
-  $('#p-netease').checked = !!config.providers.netease;
+  $('#lyrics-write-file').checked = !!config.lyrics.write_file;
+  renderSourceRows(config.sources || []);
   const endpoints = config.endpoints || {};
-  ENDPOINT_FIELDS.forEach(([id, key]) => {
-    const input = $(`#${id}`);
-    if (input) input.value = endpoints[key] || input.dataset.default;
-  });
+  $('#ep-coverart').value = endpoints.coverart || $('#ep-coverart').dataset.default;
   $('#match-threshold').value = Math.round((config.auto_match_threshold || 0.62) * 100);
   $('#threshold-value').textContent = `${$('#match-threshold').value}%`;
   $('#itunes-country').value = config.itunes_country || 'cn';
@@ -388,19 +400,16 @@ function settingsFromForm() {
   config.naming_artist_separator = $('#naming-artist-separator').value;
   config.split_separators = $('#split-separators').value
     .split(/\s+/).map((v) => v.trim()).filter(Boolean);
+  config.theme = $('#theme-select').value || 'emerald';
   config.lyrics.bilingual = $('#lyrics-bilingual').checked;
   config.lyrics.embed = $('#lyrics-embed').checked;
   config.lyrics.prefer_synced = $('#lyrics-synced').checked;
   config.lyrics.overwrite = $('#lyrics-overwrite').checked;
-  config.providers.musicbrainz = $('#p-musicbrainz').checked;
-  config.providers.itunes = $('#p-itunes').checked;
-  config.providers.deezer = $('#p-deezer').checked;
-  config.providers.lrclib = $('#p-lrclib').checked;
-  config.providers.netease = $('#p-netease').checked;
+  config.lyrics.write_file = $('#lyrics-write-file').checked;
+  config.sources = collectSourceRows();
+  config.sources_initialized = true;
   config.endpoints = { ...(config.endpoints || {}) };
-  ENDPOINT_FIELDS.forEach(([id, key]) => {
-    config.endpoints[key] = $(`#${id}`).value.trim();
-  });
+  config.endpoints.coverart = $('#ep-coverart').value.trim();
   config.auto_match_threshold = Number($('#match-threshold').value) / 100;
   config.itunes_country = $('#itunes-country').value;
   return config;
@@ -412,12 +421,15 @@ async function saveSettings() {
     toast('请至少添加一个音乐目录', 'warn');
     return;
   }
-  const badEndpoint = ENDPOINT_FIELDS.find(([id]) => {
-    const value = $(`#${id}`).value.trim();
-    return value && !/^https?:\/\//i.test(value);
+  const badSource = config.sources.find((source) => {
+    return !source.name.trim() || (source.base_url && !/^https?:\/\//i.test(source.base_url));
   });
-  if (badEndpoint) {
-    toast('API 地址必须以 http:// 或 https:// 开头', 'warn');
+  if (badSource) {
+    toast('每个接口都需要名称，API 地址必须以 http:// 或 https:// 开头', 'warn');
+    return;
+  }
+  if (config.endpoints.coverart && !/^https?:\/\//i.test(config.endpoints.coverart)) {
+    toast('Cover Art 地址必须以 http:// 或 https:// 开头', 'warn');
     return;
   }
   try {
@@ -426,6 +438,7 @@ async function saveSettings() {
     state.settingsDirty = false;
     $('#settings-dirty').classList.add('hidden');
     populateSettings();
+    await loadProviders();
     toast('设置已保存');
     await loadStats();
     await loadTracks();
@@ -745,23 +758,207 @@ async function saveTrack(id) {
 /* Metadata scraping                                                   */
 /* ------------------------------------------------------------------ */
 function providerLabel(source) {
+  const found = (state.providers || []).find((item) => item.id === source);
+  if (found) return found.name;
   return ({
     musicbrainz: 'MusicBrainz',
     itunes: 'iTunes',
     deezer: 'Deezer',
     netease: '网易云',
+    lrclib: 'LRCLIB',
   }[source] || source);
 }
 
-const METADATA_SOURCES = ['musicbrainz', 'itunes', 'deezer', 'netease'];
-const ENDPOINT_FIELDS = [
-  ['ep-musicbrainz', 'musicbrainz'],
-  ['ep-coverart', 'coverart'],
-  ['ep-itunes', 'itunes'],
-  ['ep-deezer', 'deezer'],
-  ['ep-lrclib', 'lrclib'],
-  ['ep-netease', 'netease'],
+const SOURCE_ADAPTERS = [
+  ['musicbrainz', 'MusicBrainz'],
+  ['itunes', 'iTunes / Apple Music'],
+  ['deezer', 'Deezer'],
+  ['netease', '网易云音乐'],
+  ['lrclib', 'LRCLIB'],
 ];
+const SOURCE_ADAPTER_DEFAULTS = {
+  musicbrainz: 'https://musicbrainz.org',
+  itunes: 'https://itunes.apple.com',
+  deezer: 'https://api.deezer.com',
+  netease: 'https://music.163.com',
+  lrclib: 'https://lrclib.net',
+};
+const DEFAULT_SOURCES = [
+  { id: 'musicbrainz', name: 'MusicBrainz', adapter: 'musicbrainz', base_url: SOURCE_ADAPTER_DEFAULTS.musicbrainz, enabled: true },
+  { id: 'itunes', name: 'iTunes / Apple Music', adapter: 'itunes', base_url: SOURCE_ADAPTER_DEFAULTS.itunes, enabled: true },
+  { id: 'deezer', name: 'Deezer', adapter: 'deezer', base_url: SOURCE_ADAPTER_DEFAULTS.deezer, enabled: true },
+  { id: 'netease', name: '网易云音乐', adapter: 'netease', base_url: SOURCE_ADAPTER_DEFAULTS.netease, enabled: true },
+  { id: 'lrclib', name: 'LRCLIB', adapter: 'lrclib', base_url: SOURCE_ADAPTER_DEFAULTS.lrclib, enabled: true },
+];
+
+function enabledMetadataSourceIds() {
+  return (state.providers || [])
+    .filter((provider) => provider.enabled && (provider.kind || '').includes('metadata'))
+    .map((provider) => provider.id);
+}
+
+function enabledLyricsSourceIds() {
+  return (state.providers || [])
+    .filter((provider) => provider.enabled && (provider.kind || '').includes('lyrics'))
+    .map((provider) => provider.id);
+}
+
+function sourceAdapterLabel(adapter) {
+  return (SOURCE_ADAPTERS.find(([value]) => value === adapter) || [adapter, adapter])[1];
+}
+
+function sourceKind(adapter) {
+  if (adapter === 'netease') return '元数据 + 歌词';
+  if (adapter === 'lrclib') return '歌词';
+  return '元数据';
+}
+
+function sourceRowHtml(source, index) {
+  const adapter = source.adapter || 'netease';
+  const base = source.base_url || SOURCE_ADAPTER_DEFAULTS[adapter] || '';
+  return `
+    <div class="source-row ${source.enabled === false ? 'off' : ''}" data-source-id="${escapeHtml(source.id || '')}">
+      <div class="source-order">
+        <button class="icon-btn" data-source-up title="上移" type="button">↑</button>
+        <b>${index + 1}</b>
+        <button class="icon-btn" data-source-down title="下移" type="button">↓</button>
+      </div>
+      <div class="source-body">
+        <div class="source-line">
+          <input class="source-name" data-source-name value="${escapeHtml(source.name || '')}" placeholder="接口名称">
+          <select data-source-adapter>${SOURCE_ADAPTERS.map(([value, label]) => `<option value="${value}" ${value === adapter ? 'selected' : ''}>${label}</option>`).join('')}</select>
+          <label class="source-enabled"><input type="checkbox" data-source-enabled ${source.enabled === false ? '' : 'checked'}><span>启用</span></label>
+          <button class="icon-btn" data-source-delete title="删除接口" type="button">${icon('trash')}</button>
+        </div>
+        <input class="mono source-base" data-source-base value="${escapeHtml(base)}" placeholder="https://example.com/api">
+        <small>${sourceKind(adapter)} · 基础地址，路径由程序追加</small>
+      </div>
+    </div>`;
+}
+
+function renderSourceRows(sources) {
+  const container = $('#source-list');
+  if (!container) return;
+  if (!sources.length) {
+    container.innerHTML = `<div class="empty-inline">还没有接口，点右上角「添加接口」。</div>`;
+    return;
+  }
+  container.innerHTML = sources.map(sourceRowHtml).join('');
+  $$('[data-source-up]', container).forEach((button) => {
+    button.addEventListener('click', () => moveSourceRow(button, -1));
+  });
+  $$('[data-source-down]', container).forEach((button) => {
+    button.addEventListener('click', () => moveSourceRow(button, 1));
+  });
+  $$('[data-source-delete]', container).forEach((button) => {
+    button.addEventListener('click', () => {
+      const row = button.closest('[data-source-id]');
+      if (row) row.remove();
+      renumberSourceRows();
+      markSettingsDirty();
+    });
+  });
+  $$('[data-source-enabled]', container).forEach((input) => {
+    input.addEventListener('change', () => {
+      input.closest('.source-row')?.classList.toggle('off', !input.checked);
+      markSettingsDirty();
+    });
+  });
+  $$('[data-source-adapter]', container).forEach((select) => {
+    select.addEventListener('change', () => {
+      const row = select.closest('.source-row');
+      const base = $('[data-source-base]', row);
+      if (base && !base.value.trim()) base.value = SOURCE_ADAPTER_DEFAULTS[select.value] || '';
+      const hint = row ? $('small', row) : null;
+      if (hint) hint.textContent = `${sourceKind(select.value)} · 基础地址，路径由程序追加`;
+      markSettingsDirty();
+    });
+  });
+  $$('[data-source-name], [data-source-base]', container).forEach((input) => {
+    input.addEventListener('input', markSettingsDirty);
+  });
+}
+
+function collectSourceRows() {
+  return $$('#source-list [data-source-id]').map((row) => ({
+    id: row.dataset.sourceId,
+    name: $('[data-source-name]', row)?.value.trim() || '',
+    adapter: $('[data-source-adapter]', row)?.value || 'netease',
+    base_url: $('[data-source-base]', row)?.value.trim() || '',
+    enabled: $('[data-source-enabled]', row)?.checked ?? true,
+  }));
+}
+
+function renumberSourceRows() {
+  $$('#source-list [data-source-id]').forEach((row, index) => {
+    const number = $('.source-order b', row);
+    if (number) number.textContent = String(index + 1);
+    $('[data-source-up]', row)?.toggleAttribute('disabled', index === 0);
+    $('[data-source-down]', row)?.toggleAttribute('disabled', index === $$('#source-list [data-source-id]').length - 1);
+  });
+}
+
+function moveSourceRow(button, delta) {
+  const row = button.closest('[data-source-id]');
+  if (!row) return;
+  const rows = $$('#source-list [data-source-id]');
+  const index = rows.indexOf(row);
+  const target = rows[index + delta];
+  if (!target) return;
+  if (delta < 0) target.before(row);
+  else target.after(row);
+  renumberSourceRows();
+  markSettingsDirty();
+}
+const SCRAPE_FIELD_GROUPS = [
+  {
+    label: '基础',
+    fields: [
+      ['title', '标题'], ['artist', '显示艺术家'], ['artists', '艺术家列表'],
+      ['album', '专辑'], ['albumartist', '专辑艺术家'],
+    ],
+  },
+  {
+    label: '曲目',
+    fields: [
+      ['track', '音轨号'], ['track_total', '音轨总数'], ['disc', '碟号'],
+      ['disc_total', '碟总数'], ['date', '日期'], ['year', '年份'], ['genres', '流派'],
+    ],
+  },
+  {
+    label: '出版',
+    fields: [
+      ['label', '唱片公司'], ['catalog_number', '目录号'], ['isrc', 'ISRC'], ['bpm', 'BPM'],
+    ],
+  },
+  {
+    label: 'MusicBrainz',
+    fields: [
+      ['mb_track_id', '录音 ID'], ['mb_album_id', '专辑 ID'], ['mb_artist_id', '艺术家 ID'],
+    ],
+  },
+];
+const DEFAULT_SCRAPE_FIELDS = SCRAPE_FIELD_GROUPS.flatMap((group) => group.fields.map(([id]) => id));
+
+function scrapeFieldsHtml() {
+  return `
+    <div class="scrape-field-groups">
+      ${SCRAPE_FIELD_GROUPS.map((group) => `
+        <div class="scrape-field-group">
+          <b>${escapeHtml(group.label)}</b>
+          <div class="scrape-field-list">
+            ${group.fields.map(([value, label]) => `
+              <label class="check-label check-mini">
+                <input type="checkbox" data-scrape-field value="${value}" checked>${escapeHtml(label)}
+              </label>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function selectedScrapeFields() {
+  return $$('[data-scrape-field]:checked').map((input) => input.value);
+}
 
 async function openScrape(ids) {
   if (!ids.length) return;
@@ -772,8 +969,8 @@ async function openScrape(ids) {
   }
   state.scrapeTrackId = id;
   state.scrapeCandidates = [];
-  const providers = state.settings?.config?.providers || {};
-  state.scrapeSources = new Set(METADATA_SOURCES.filter((name) => providers[name] !== false));
+  const metadataProviders = (state.providers || []).filter((provider) => provider.enabled && (provider.kind || '').includes('metadata'));
+  state.scrapeSources = new Set(metadataProviders.map((provider) => provider.id));
   const body = `
     <div class="scrape-query">
       <label class="field"><span>歌曲标题</span><input id="scrape-title" value="${escapeHtml(track.title)}" placeholder="必填"></label>
@@ -783,12 +980,22 @@ async function openScrape(ids) {
     </div>
     <div class="scrape-toolbar">
       <div class="source-toggles" id="scrape-sources">
-        ${METADATA_SOURCES.map((name) => `<button class="source-toggle ${state.scrapeSources.has(name) ? 'on' : ''}" data-source="${name}"><i class="toggle-check"></i>${providerLabel(name)}</button>`).join('')}
+        ${metadataProviders.map((provider) => `<button class="source-toggle ${state.scrapeSources.has(provider.id) ? 'on' : ''}" data-source="${escapeHtml(provider.id)}"><i class="toggle-check"></i>${escapeHtml(provider.name)}</button>`).join('')}
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap">
         <label class="check-label"><input type="checkbox" id="scrape-overwrite" checked>覆盖已有标签</label>
         <label class="check-label"><input type="checkbox" id="scrape-no-lyrics" checked>只改元数据（不生成歌词）</label>
+        <label class="check-label"><input type="checkbox" id="scrape-cover" checked>同时更新封面</label>
       </div>
+    </div>
+    <div class="scrape-fields-panel">
+      <div class="scrape-fields-head">
+        <b>应用这些元数据字段</b>
+        <button class="btn btn-sm btn-ghost" id="scrape-fields-all" type="button">全选</button>
+        <button class="btn btn-sm btn-ghost" id="scrape-fields-none" type="button">全不选</button>
+      </div>
+      ${scrapeFieldsHtml()}
+      <p class="hint">未勾选的字段保留原值。关闭封面选项时也会保留原封面。</p>
     </div>
     <div id="scrape-results" class="candidate-list">
       <div class="empty-inline">输入关键词后搜索，或使用「智能刮削」自动匹配。</div>
@@ -804,6 +1011,12 @@ async function openScrape(ids) {
     });
   });
   $('#run-scrape').addEventListener('click', () => runScrapeSearch(id));
+  $('#scrape-fields-all').addEventListener('click', () => {
+    $$('[data-scrape-field]').forEach((input) => { input.checked = true; });
+  });
+  $('#scrape-fields-none').addEventListener('click', () => {
+    $$('[data-scrape-field]').forEach((input) => { input.checked = false; });
+  });
   $('#scrape-title').addEventListener('keydown', (event) => { if (event.key === 'Enter') runScrapeSearch(id); });
   if (track.title) runScrapeSearch(id);
 }
@@ -867,12 +1080,21 @@ async function applyCandidate(trackId, index, button) {
   if (!candidate) return;
   const overwrite = $('#scrape-overwrite')?.checked ?? true;
   const noLyrics = $('#scrape-no-lyrics')?.checked ?? true;
+  const fields = selectedScrapeFields();
+  const cover = $('#scrape-cover')?.checked ?? true;
+  const lyricsWriteFile = !!state.settings?.config?.lyrics?.write_file;
+  let lyricsEmbed = !!state.settings?.config?.lyrics?.embed;
+  if (!lyricsWriteFile && !lyricsEmbed) lyricsEmbed = true;
+  if (!fields.length) {
+    toast('请至少选择一个要写入的字段', 'warn');
+    return;
+  }
   button.disabled = true;
   button.innerHTML = `<span class="spinner"></span>`;
   try {
     await withLoading('写入元数据与封面…', () => api('/api/scrape/apply', {
       method: 'POST',
-      body: { track_id: trackId, candidate, overwrite, cover: true },
+      body: { track_id: trackId, candidate, overwrite, cover, fields },
     }));
     let lyricsMessage = '';
     if (!noLyrics) {
@@ -882,8 +1104,10 @@ async function applyCandidate(trackId, index, button) {
           body: {
             ids: [trackId],
             bilingual: state.settings?.config?.lyrics?.bilingual ?? true,
-            embed: state.settings?.config?.lyrics?.embed ?? true,
+            embed: lyricsEmbed,
+            write_file: lyricsWriteFile,
             overwrite: state.settings?.config?.lyrics?.overwrite ?? true,
+            sources: enabledLyricsSourceIds(),
           },
         }));
         lyricsMessage = lyrics.updated
@@ -915,18 +1139,43 @@ function openAutoScrapeDialog(ids) {
         <input type="checkbox" id="auto-no-lyrics" checked>
         只改元数据（不生成歌词文件）
       </label>
+      <label class="check-label" style="margin-top:8px">
+        <input type="checkbox" id="auto-cover" checked>
+        同时更新封面
+      </label>
       <p class="hint" style="margin-top:8px">取消勾选会额外为匹配成功的歌曲刮削歌词，耗时更长。</p>
+    </div>
+    <div class="scrape-fields-panel">
+      <div class="scrape-fields-head">
+        <b>只写入这些字段</b>
+        <button class="btn btn-sm btn-ghost" id="auto-fields-all" type="button">全选</button>
+        <button class="btn btn-sm btn-ghost" id="auto-fields-none" type="button">全不选</button>
+      </div>
+      ${scrapeFieldsHtml()}
+      <p class="hint">未勾选的字段保留原值。</p>
     </div>`;
   const footer = `<button class="btn btn-ghost" data-close-modal>取消</button><button class="btn btn-primary" id="auto-start">${icon('wand')}开始智能刮削</button>`;
   openModal({ title: '智能刮削', subtitle: '开始后可以随时停止', body, footer });
+  $('#auto-fields-all').addEventListener('click', () => {
+    $$('[data-scrape-field]').forEach((input) => { input.checked = true; });
+  });
+  $('#auto-fields-none').addEventListener('click', () => {
+    $$('[data-scrape-field]').forEach((input) => { input.checked = false; });
+  });
   $('#auto-start').addEventListener('click', () => {
     const noLyrics = $('#auto-no-lyrics')?.checked ?? true;
+    const cover = $('#auto-cover')?.checked ?? true;
+    const fields = selectedScrapeFields();
+    if (!fields.length) {
+      toast('请至少选择一个要写入的字段', 'warn');
+      return;
+    }
     closeModal();
-    runAutoScrapeJob(ids.slice(0, 50), noLyrics);
+    runAutoScrapeJob(ids.slice(0, 50), noLyrics, fields, cover);
   });
 }
 
-async function runAutoScrapeJob(ids, noLyrics) {
+async function runAutoScrapeJob(ids, noLyrics, fields = DEFAULT_SCRAPE_FIELDS, cover = true) {
   if (!ids.length) return;
   let cancelled = false;
   let done = 0;
@@ -980,7 +1229,9 @@ async function runAutoScrapeJob(ids, noLyrics) {
           ids: [id],
           threshold: state.settings?.config?.auto_match_threshold ?? 0.62,
           overwrite: true,
-          cover: true,
+          cover,
+          fields,
+          sources: enabledMetadataSourceIds(),
         },
       });
       const item = result.results?.[0];
@@ -1012,8 +1263,10 @@ async function runAutoScrapeJob(ids, noLyrics) {
           body: {
             ids: [successful[index]],
             bilingual: state.settings?.config?.lyrics?.bilingual ?? true,
-            embed: state.settings?.config?.lyrics?.embed ?? true,
+            embed: lyricsEmbed,
+            write_file: lyricsWriteFile,
             overwrite: state.settings?.config?.lyrics?.overwrite ?? true,
+            sources: enabledLyricsSourceIds(),
           },
         });
         lyricsUpdated += lyrics.updated || 0;
@@ -1061,18 +1314,20 @@ async function openLyricsForTrack(id) {
   const body = `
     <div class="lyrics-layout">
       <div class="lyrics-preview-pane">
-        <div class="pane-head"><span>歌词预览</span><span id="lyrics-status">${track.has_lyrics ? '已有歌词' : '尚无歌词'}</span></div>
+        <div class="pane-head"><span>原文件歌词</span><span id="lyrics-status">${track.has_lyrics ? '已有歌词' : '尚无歌词'}</span></div>
         <div class="lyrics-content" id="lyrics-preview"><div class="empty-inline">加载中…</div></div>
       </div>
       <div class="lyrics-results-pane">
         <div class="pane-head"><span>搜索结果</span><button class="btn btn-sm btn-ghost" id="search-lyrics">${icon('search')}重新搜索</button></div>
-        <div id="lyrics-results" style="overflow:auto;max-height:500px"><div class="modal-loading"><span class="spinner"></span><span>搜索同步歌词与翻译…</span></div></div>
+        <div id="lyrics-results" style="overflow:auto;max-height:300px"><div class="modal-loading"><span class="spinner"></span><span>搜索同步歌词与翻译…</span></div></div>
+        <div class="candidate-preview-head"><span>选中结果预览</span><span id="lyric-candidate-status">未选择</span></div>
+        <pre class="lyric-candidate-full" id="lyric-candidate-preview">选择右侧搜索结果后在这里预览，不会覆盖左侧原歌词。</pre>
       </div>
     </div>
     <div class="lyrics-options">
       <label class="check-label"><input type="checkbox" id="lyrics-bilingual-opt" ${state.settings?.config?.lyrics?.bilingual ? 'checked' : ''}>双语合并</label>
       <label class="check-label"><input type="checkbox" id="lyrics-embed-opt" ${state.settings?.config?.lyrics?.embed ? 'checked' : ''}>嵌入音频标签</label>
-      <label class="check-label"><input type="checkbox" id="lyrics-file-opt" checked>新建 .lrc 文件</label>
+      <label class="check-label"><input type="checkbox" id="lyrics-file-opt" ${state.settings?.config?.lyrics?.write_file ? 'checked' : ''}>新建 .lrc 文件</label>
       <span style="color:var(--muted-2);font-size:10.5px">不新建文件时仅写入标签；翻译来自网易云音乐。</span>
     </div>`;
   const footer = `<button class="btn btn-ghost" data-close-modal>关闭</button><button class="btn btn-primary" id="apply-lyric" disabled>${icon('lyrics')}应用歌词</button>`;
@@ -1091,13 +1346,17 @@ async function openLyricsForTrack(id) {
   const current = await api(`/api/tracks/${id}/lyrics`).catch(() => ({ lyrics: '' }));
   if (!$('#lyrics-preview')) return;
   $('#lyrics-preview').textContent = current.lyrics || '当前没有歌词。';
-  $('#lyrics-status').textContent = current.lyrics ? '当前歌词' : '尚无歌词';
+  $('#lyrics-status').textContent = current.lyrics ? '原文件歌词' : '尚无歌词';
   searchLyricsForTrack(id);
 }
 
 async function searchLyricsForTrack(id) {
   const results = $('#lyrics-results');
   results.innerHTML = `<div class="modal-loading"><span class="spinner"></span><span>搜索同步歌词与翻译…</span></div>`;
+  const preview = $('#lyric-candidate-preview');
+  if (preview) preview.textContent = '选择右侧搜索结果后在这里预览，不会覆盖左侧原歌词。';
+  const candidateStatus = $('#lyric-candidate-status');
+  if (candidateStatus) candidateStatus.textContent = '未选择';
   try {
     const data = await api('/api/lyrics/search', { method: 'POST', body: { track_id: id } });
     if (!document.querySelector('#lyrics-results')) return;
@@ -1154,8 +1413,12 @@ function renderLyricPreview() {
     const trans = translated.split('\n');
     preview = lines.map((line, index) => `${line}${trans[index] ? `\n${trans[index]}` : ''}`).join('\n');
   }
-  $('#lyrics-preview').textContent = preview || '（空）';
-  $('#lyrics-status').textContent = `来自 ${providerLabel(candidate.source)} · ${candidate.has_synced ? '同步歌词' : '纯文本'}`;
+  const target = $('#lyric-candidate-preview');
+  if (target) target.textContent = preview || '（空）';
+  const status = $('#lyric-candidate-status');
+  if (status) {
+    status.textContent = `${providerLabel(candidate.source)} · ${candidate.has_synced ? '同步歌词' : '纯文本'} · ${pct(candidate.match_score)}`;
+  }
 }
 
 async function applySelectedLyrics(trackId) {
@@ -1163,7 +1426,7 @@ async function applySelectedLyrics(trackId) {
   if (!candidate) return;
   const bilingual = $('#lyrics-bilingual-opt')?.checked ?? true;
   let embed = $('#lyrics-embed-opt')?.checked ?? true;
-  let writeFile = $('#lyrics-file-opt')?.checked ?? true;
+  let writeFile = $('#lyrics-file-opt')?.checked ?? !!state.settings?.config?.lyrics?.write_file;
   if (!writeFile && !embed) {
     embed = true;
     $('#lyrics-embed-opt').checked = true;
@@ -1201,7 +1464,7 @@ function openBatchLyricsDialog(ids) {
       <div class="summary-number">${fmtNumber(total)}<small> 首</small></div>
       <p class="hint">为所选歌曲自动匹配歌词，匹配度过低会跳过。</p>
       <label class="check-label" style="margin-top:14px">
-        <input type="checkbox" id="batch-lyrics-file" checked>
+        <input type="checkbox" id="batch-lyrics-file" ${state.settings?.config?.lyrics?.write_file ? 'checked' : ''}>
         新建 .lrc 歌词文件
       </label>
       <label class="check-label" style="margin-top:10px">
@@ -1235,35 +1498,86 @@ function openBatchLyricsDialog(ids) {
 
 async function batchLyrics(ids, options = {}) {
   if (!ids.length) return;
-  const writeFile = options.writeFile ?? true;
+  const writeFile = options.writeFile ?? !!state.settings?.config?.lyrics?.write_file;
   let embed = options.embed ?? (state.settings?.config?.lyrics?.embed ?? true);
   if (!writeFile && !embed) embed = true;
-  showLoading(`正在为 ${Math.min(ids.length, 50)} 首歌曲匹配歌词…`);
-  try {
-    const result = await api('/api/lyrics/batch', {
-      method: 'POST',
-      body: {
-        ids: ids.slice(0, 50),
-        bilingual: state.settings?.config?.lyrics?.bilingual ?? true,
-        embed,
-        write_file: writeFile,
-        overwrite: state.settings?.config?.lyrics?.overwrite ?? true,
-      },
-    });
-    hideLoading();
-    const failed = (result.results || []).filter((item) => !item.ok);
-    showBatchResult(
-      writeFile ? '批量歌词' : '批量歌词（仅标签）',
-      result.updated,
-      result.total,
-      failed,
-      '写入',
-    );
-    await Promise.all([loadTracks(), loadStats()]);
-  } catch (error) {
-    hideLoading();
-    toast(error.message, 'error', 6000);
+  const targets = ids.slice(0, 50);
+  const lyricsWriteFile = !!state.settings?.config?.lyrics?.write_file;
+  let lyricsEmbed = !!state.settings?.config?.lyrics?.embed;
+  if (!lyricsWriteFile && !lyricsEmbed) lyricsEmbed = true;
+  let cancelled = false;
+  let done = 0;
+  let updated = 0;
+  const failures = [];
+
+  const body = `
+    <div class="auto-job">
+      <div class="auto-job-top"><span id="batch-lyrics-current">准备中…</span><b id="batch-lyrics-count">0 / ${targets.length}</b></div>
+      <div class="progress"><i id="batch-lyrics-bar"></i></div>
+      <p class="hint" id="batch-lyrics-hint">逐首匹配歌词，可随时停止；当前歌曲会先完成。</p>
+    </div>`;
+  openModal({
+    title: '批量歌词中',
+    subtitle: `${targets.length} 首歌曲`,
+    body,
+    footer: `<button class="btn btn-danger" id="batch-lyrics-stop">${icon('close')}停止</button>`,
+    locked: true,
+  });
+
+  const update = () => {
+    const percent = Math.round((done / targets.length) * 100);
+    $('#batch-lyrics-count').textContent = `${done} / ${targets.length}`;
+    $('#batch-lyrics-bar').style.width = `${percent}%`;
+  };
+
+  $('#batch-lyrics-stop').addEventListener('click', () => {
+    cancelled = true;
+    const button = $('#batch-lyrics-stop');
+    if (button) {
+      button.disabled = true;
+      button.textContent = '正在停止…';
+    }
+    const hint = $('#batch-lyrics-hint');
+    if (hint) hint.textContent = '将在当前歌曲处理完成后停止。';
+  });
+
+  for (const id of targets) {
+    if (cancelled) break;
+    const track = state.trackMap.get(id);
+    const current = $('#batch-lyrics-current');
+    if (current) current.textContent = `正在匹配：${track ? (track.title || track.filename) : `#${id}`}`;
+    try {
+      const result = await api('/api/lyrics/batch', {
+        method: 'POST',
+        body: {
+          ids: [id],
+          bilingual: state.settings?.config?.lyrics?.bilingual ?? true,
+          embed,
+          write_file: writeFile,
+          overwrite: state.settings?.config?.lyrics?.overwrite ?? true,
+          sources: enabledLyricsSourceIds(),
+        },
+      });
+      const item = result.results?.[0];
+      if (item?.ok) updated += 1;
+      else failures.push(item || { id, message: '未匹配' });
+    } catch (error) {
+      failures.push({ id, title: track?.title || `#${id}`, message: error.message });
+    }
+    done += 1;
+    update();
   }
+
+  closeModal();
+  showBatchResult(
+    cancelled ? '批量歌词已停止' : (writeFile ? '批量歌词' : '批量歌词（仅标签）'),
+    updated,
+    targets.length,
+    failures,
+    '写入',
+  );
+  if (cancelled) toast(`已停止，完成 ${updated} 首`, 'warn');
+  await Promise.all([loadTracks(), loadStats()]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1298,17 +1612,57 @@ function openDelimiterModal(ids) {
     if (!fields.length) { toast('请至少选择一个字段', 'warn'); return; }
     const inputSeparators = $('#norm-input').value.split(/\s+/).filter(Boolean);
     const outputSeparator = $('#norm-output').value;
-    try {
-      const result = await withLoading('重写标签…', () => api('/api/tracks/normalize', {
-        method: 'POST',
-        body: { ids, fields, input_separators: inputSeparators, output_separator: outputSeparator },
-      }));
-      closeModal();
-      toast(`已更新 ${result.updated} 首歌曲${result.errors?.length ? `，${result.errors.length} 个错误` : ''}`);
-      await Promise.all([loadTracks(), loadStats()]);
-    } catch (error) {
-      toast(error.message, 'error', 6000);
+    const targets = [...ids];
+    let cancelled = false;
+    let done = 0;
+    let updated = 0;
+    const failures = [];
+    closeModal();
+    openModal({
+      title: '批量修改分隔符中',
+      subtitle: `${targets.length} 首歌曲`,
+      body: `
+        <div class="auto-job">
+          <div class="auto-job-top"><span id="norm-current">准备中…</span><b id="norm-count">0 / ${targets.length}</b></div>
+          <div class="progress"><i id="norm-bar"></i></div>
+          <p class="hint" id="norm-hint">可随时停止；当前歌曲会先完成。</p>
+        </div>`,
+      footer: `<button class="btn btn-danger" id="norm-stop">${icon('close')}停止</button>`,
+      locked: true,
+    });
+    $('#norm-stop').addEventListener('click', () => {
+      cancelled = true;
+      const button = $('#norm-stop');
+      if (button) { button.disabled = true; button.textContent = '正在停止…'; }
+      const hint = $('#norm-hint');
+      if (hint) hint.textContent = '将在当前歌曲处理完成后停止。';
+    });
+    const update = () => {
+      $('#norm-count').textContent = `${done} / ${targets.length}`;
+      $('#norm-bar').style.width = `${Math.round((done / targets.length) * 100)}%`;
+    };
+    for (const id of targets) {
+      if (cancelled) break;
+      const track = state.trackMap.get(id);
+      const current = $('#norm-current');
+      if (current) current.textContent = `正在处理：${track ? (track.title || track.filename) : `#${id}`}`;
+      try {
+        const result = await api('/api/tracks/normalize', {
+          method: 'POST',
+          body: { ids: [id], fields, input_separators: inputSeparators, output_separator: outputSeparator },
+        });
+        updated += result.updated || 0;
+        for (const error of result.errors || []) failures.push(error);
+      } catch (error) {
+        failures.push({ id, message: error.message });
+      }
+      done += 1;
+      update();
     }
+    closeModal();
+    showBatchResult(cancelled ? '批量修改分隔符已停止' : '批量修改分隔符', updated, targets.length, failures, '更新');
+    if (cancelled) toast(`已停止，完成 ${updated} 首`, 'warn');
+    await Promise.all([loadTracks(), loadStats()]);
   });
 }
 
@@ -1573,17 +1927,30 @@ function wireEvents() {
     if (event.key === 'Enter') { event.preventDefault(); $('#add-root').click(); }
   });
   $('#save-settings').addEventListener('click', saveSettings);
-  $('#reset-endpoints')?.addEventListener('click', () => {
-    ENDPOINT_FIELDS.forEach(([id]) => {
-      const input = $(`#${id}`);
-      if (input) input.value = input.dataset.default || '';
+  $('#add-source')?.addEventListener('click', () => {
+    const sources = collectSourceRows();
+    const number = sources.length + 1;
+    sources.push({
+      id: `source-${Date.now().toString(36)}`,
+      name: `新接口 ${number}`,
+      adapter: 'netease',
+      base_url: SOURCE_ADAPTER_DEFAULTS.netease,
+      enabled: true,
     });
+    renderSourceRows(sources);
     markSettingsDirty();
-    toast('已恢复默认 API 地址，保存后生效');
+  });
+  $('#reset-sources')?.addEventListener('click', () => {
+    renderSourceRows(DEFAULT_SOURCES.map((source) => ({ ...source })));
+    const cover = $('#ep-coverart');
+    if (cover) cover.value = cover.dataset.default || 'https://coverartarchive.org';
+    markSettingsDirty();
+    toast('已恢复默认接口，保存后生效');
   });
   $('#match-threshold').addEventListener('input', (event) => {
     $('#threshold-value').textContent = `${event.target.value}%`;
   });
+  $('#theme-select').addEventListener('change', (event) => applyTheme(event.target.value));
   $('#view-settings').addEventListener('input', markSettingsDirty);
   $('#view-settings').addEventListener('change', markSettingsDirty);
 

@@ -23,6 +23,7 @@
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></symbol>
     <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M7 12h10"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></symbol>
     <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
     <symbol id="i-wand" viewBox="0 0 24 24"><path d="m4 20 11-11"/><path d="m14 5 1-2 1 2 2 1-2 1-1 2-1-2-2-1z"/><path d="m19 12 .7-1.5.8 1.5 1.5.8-1.5.7-.8 1.5-.7-1.5-1.5-.7z"/></symbol>
     <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
@@ -218,6 +219,18 @@
               </section>
 
               <section class="panel settings-section">
+                <div class="panel-title"><div><span class="eyebrow">APPEARANCE</span><h2>外观</h2></div></div>
+                <div class="form-grid compact">
+                  <label class="field"><span>主题</span><select id="theme-select">
+                    <option value="emerald">翡翠 · 默认</option>
+                    <option value="ocean">深海 · 蓝</option>
+                    <option value="violet">暮光 · 紫</option>
+                    <option value="light">纸白 · 亮色</option>
+                  </select><small>保存后立即切换，所有设备共用此设置。</small></label>
+                </div>
+              </section>
+
+              <section class="panel settings-section">
                 <div class="panel-title"><div><span class="eyebrow">TAGS</span><h2>标签与分隔符</h2></div></div>
                 <div class="form-grid">
                   <label class="field"><span>默认写入分隔符</span><input id="tag-separator" class="mono" type="text" placeholder="; "><small>各字段留空时使用。</small></label>
@@ -241,46 +254,30 @@
                   <label class="switch-row"><span><b>双语歌词</b><small>原歌词与翻译逐行合并</small></span><input type="checkbox" id="lyrics-bilingual"><i></i></label>
                   <label class="switch-row"><span><b>嵌入标签</b><small>同时写入音频标签</small></span><input type="checkbox" id="lyrics-embed"><i></i></label>
                   <label class="switch-row"><span><b>优先同步歌词</b><small>优先选择带时间轴的结果</small></span><input type="checkbox" id="lyrics-synced"><i></i></label>
-                  <label class="switch-row"><span><b>覆盖已有歌词</b><small>批量刮削时替换现有 .lrc</small></span><input type="checkbox" id="lyrics-overwrite"><i></i></label>
+                  <label class="switch-row"><span><b>覆盖已有歌词</b><small>批量刮削时替换现有歌词</small></span><input type="checkbox" id="lyrics-overwrite"><i></i></label>
+                  <label class="switch-row"><span><b>默认新建 .lrc 文件</b><small>关闭时默认只嵌入音频标签</small></span><input type="checkbox" id="lyrics-write-file"><i></i></label>
                 </div>
               </section>
 
-              <section class="panel settings-section">
-                <div class="panel-title"><div><span class="eyebrow">SOURCES</span><h2>刮削源</h2></div></div>
-                <div class="switch-grid">
-                  <label class="switch-row"><span><b>MusicBrainz</b><small>开放元数据与 MBID，1 请求/秒</small></span><input type="checkbox" id="p-musicbrainz"><i></i></label>
-                  <label class="switch-row"><span><b>iTunes / Apple Music</b><small>封面与曲目信息，自动回退港台/美区</small></span><input type="checkbox" id="p-itunes"><i></i></label>
-                  <label class="switch-row"><span><b>Deezer</b><small>补充欧洲曲库</small></span><input type="checkbox" id="p-deezer"><i></i></label>
-                  <label class="switch-row"><span><b>LRCLIB</b><small>开源同步歌词</small></span><input type="checkbox" id="p-lrclib"><i></i></label>
-                  <label class="switch-row"><span><b>网易云音乐</b><small>元数据、封面、中文歌词与翻译</small></span><input type="checkbox" id="p-netease"><i></i></label>
-                </div>
-                <div class="form-grid compact">
-                  <label class="field"><span>自动匹配阈值 <b id="threshold-value">62%</b></span><input id="match-threshold" type="range" min="40" max="95" step="1"><small>低于阈值的批量刮削结果会被跳过。</small></label>
-                  <label class="field"><span>iTunes 商店</span><select id="itunes-country"><option value="cn">中国大陆</option><option value="hk">中国香港</option><option value="tw">中国台湾</option><option value="us">美国</option><option value="jp">日本</option><option value="gb">英国</option></select><small>无结果时自动尝试港台/美区。</small></label>
-                </div>
-              </section>
-
-              <section class="panel settings-section" id="endpoint-settings">
+              <section class="panel settings-section" id="sources-settings">
                 <div class="panel-title">
-                  <div><span class="eyebrow">API</span><h2>音乐源接口</h2></div>
+                  <div><span class="eyebrow">SOURCES</span><h2>音乐源接口</h2></div>
                   <div class="header-actions">
-                    <button class="btn btn-sm btn-ghost" id="reset-endpoints" type="button">恢复默认</button>
+                    <button class="btn btn-sm btn-ghost" id="reset-sources" type="button">恢复默认</button>
+                    <button class="btn btn-sm btn-primary" id="add-source" type="button">+ 添加接口</button>
                   </div>
                 </div>
-                <p class="hint" style="margin-bottom:12px">只填写基础地址：可带路径前缀，不要带末尾 <code>/</code> 或查询参数。可以指向官方镜像、反向代理或自建网关；保存后立即生效。</p>
-                <div class="form-grid compact">
-                  <label class="field"><span>MusicBrainz</span><input id="ep-musicbrainz" class="mono" type="url" data-default="https://musicbrainz.org" placeholder="https://musicbrainz.org"><small>请求 <code>/ws/2/recording</code></small></label>
-                  <label class="field"><span>Cover Art Archive</span><input id="ep-coverart" class="mono" type="url" data-default="https://coverartarchive.org" placeholder="https://coverartarchive.org"><small>请求 <code>/release/{id}/front-500</code></small></label>
-                  <label class="field"><span>iTunes / Apple Music</span><input id="ep-itunes" class="mono" type="url" data-default="https://itunes.apple.com" placeholder="https://itunes.apple.com"><small>请求 <code>/search</code></small></label>
-                  <label class="field"><span>Deezer</span><input id="ep-deezer" class="mono" type="url" data-default="https://api.deezer.com" placeholder="https://api.deezer.com"><small>请求 <code>/search</code></small></label>
-                  <label class="field"><span>LRCLIB</span><input id="ep-lrclib" class="mono" type="url" data-default="https://lrclib.net" placeholder="https://lrclib.net"><small>请求 <code>/api/get</code>、<code>/api/search</code></small></label>
-                  <label class="field"><span>网易云音乐</span><input id="ep-netease" class="mono" type="url" data-default="https://music.163.com" placeholder="https://music.163.com"><small>请求 <code>/api/search/get</code>、<code>/api/song/detail</code>、<code>/api/song/lyric</code></small></label>
+                <p class="hint" style="margin-bottom:12px">列表顺序就是刮削优先级，越靠前越优先。可添加多个同一类型的接口，例如两个网易云网关。只填基础地址，可带路径前缀，不要带末尾 <code>/</code> 或查询参数。</p>
+                <div class="source-list" id="source-list"></div>
+                <div class="form-grid compact" style="margin-top:16px">
+                  <label class="field"><span>Cover Art Archive</span><input id="ep-coverart" class="mono" type="url" data-default="https://coverartarchive.org" placeholder="https://coverartarchive.org"><small>MusicBrainz 封面基础地址 <code>/release/{id}/front-500</code></small></label>
+                  <label class="field"><span>自动匹配阈值 <b id="threshold-value">62%</b></span><input id="match-threshold" type="range" min="40" max="95" step="1"><small>低于阈值的智能刮削结果会被跳过。</small></label>
+                  <label class="field"><span>iTunes 商店</span><select id="itunes-country"><option value="cn">中国大陆</option><option value="hk">中国香港</option><option value="tw">中国台湾</option><option value="us">美国</option><option value="jp">日本</option><option value="gb">英国</option></select><small>无结果时自动尝试港台/美区。</small></label>
                 </div>
                 <details class="api-paths">
-                  <summary>查看完整接口路径</summary>
+                  <summary>接口类型和实际请求路径</summary>
                   <ul>
                     <li><b>MusicBrainz</b> <code>GET {base}/ws/2/recording?query=…&amp;fmt=json</code></li>
-                    <li><b>Cover Art</b> <code>GET {base}/release/{release-id}/front-500</code></li>
                     <li><b>iTunes</b> <code>GET {base}/search?term=…&amp;entity=song&amp;country=…</code></li>
                     <li><b>Deezer</b> <code>GET {base}/search?q=…</code></li>
                     <li><b>LRCLIB</b> <code>GET {base}/api/get</code> / <code>{base}/api/search</code> / <code>{base}/api/get/{id}</code></li>

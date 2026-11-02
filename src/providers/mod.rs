@@ -112,60 +112,56 @@ impl Providers {
         sources: Option<&[String]>,
     ) -> Vec<Candidate> {
         let wanted = |name: &str| sources.map(|s| s.iter().any(|v| v == name)).unwrap_or(true);
-        let mut jobs: Vec<futures::future::BoxFuture<'_, (&'static str, Result<Vec<Candidate>>)>> =
+        let mut jobs: Vec<futures::future::BoxFuture<'_, (String, Result<Vec<Candidate>>)>> =
             Vec::new();
-        if config.providers.musicbrainz && wanted("musicbrainz") {
-            jobs.push(Box::pin(async {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(13),
-                    self.musicbrainz.search(
-                        &self.client,
-                        query,
-                        &config.endpoints.musicbrainz,
-                        &config.endpoints.coverart,
-                    ),
-                )
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时")));
-                ("musicbrainz", result)
-            }));
-        }
-        if config.providers.itunes && wanted("itunes") {
-            jobs.push(Box::pin(async {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(11),
-                    itunes::search(
-                        &self.client,
-                        query,
-                        &config.itunes_country,
-                        &config.endpoints.itunes,
-                    ),
-                )
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时")));
-                ("itunes", result)
-            }));
-        }
-        if config.providers.deezer && wanted("deezer") {
-            jobs.push(Box::pin(async {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(6),
-                    deezer::search(&self.client, query, &config.endpoints.deezer),
-                )
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时")));
-                ("deezer", result)
-            }));
-        }
-        if config.providers.netease && wanted("netease") {
-            jobs.push(Box::pin(async {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(12),
-                    netease::search_metadata(&self.client, query, &config.endpoints.netease),
-                )
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时")));
-                ("netease", result)
+        for interface in config.enabled_sources() {
+            if !crate::config::adapter_metadata(&interface.adapter) || !wanted(&interface.id) {
+                continue;
+            }
+            let interface = interface.clone();
+            let source_id = interface.id.clone();
+            let coverart = config.endpoints.coverart.clone();
+            let country = config.itunes_country.clone();
+            jobs.push(Box::pin(async move {
+                let result = match interface.adapter.as_str() {
+                    "musicbrainz" => tokio::time::timeout(
+                        Duration::from_secs(13),
+                        self.musicbrainz.search(
+                            &self.client,
+                            query,
+                            &interface.base_url,
+                            &coverart,
+                        ),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "itunes" => tokio::time::timeout(
+                        Duration::from_secs(11),
+                        itunes::search(&self.client, query, &country, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "deezer" => tokio::time::timeout(
+                        Duration::from_secs(6),
+                        deezer::search(&self.client, query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "netease" => tokio::time::timeout(
+                        Duration::from_secs(12),
+                        netease::search_metadata(&self.client, query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    _ => Ok(Vec::new()),
+                };
+                let result = result.map(|mut items| {
+                    for candidate in &mut items {
+                        candidate.source = source_id.clone();
+                    }
+                    items
+                });
+                (source_id, result)
             }));
         }
         let results = futures::future::join_all(jobs).await;
@@ -177,6 +173,23 @@ impl Providers {
             }
         }
         rank(query, &mut candidates);
+        let order: std::collections::HashMap<String, usize> = config
+            .sources
+            .iter()
+            .enumerate()
+            .map(|(index, source)| (source.id.clone(), index))
+            .collect();
+        let priority_bonus = |source: &str| {
+            let index = order.get(source).copied().unwrap_or(order.len());
+            (order.len().saturating_sub(index)) as f64 * 0.004
+        };
+        candidates.sort_by(|a, b| {
+            let a_score = a.match_score + priority_bonus(&a.source);
+            let b_score = b.match_score + priority_bonus(&b.source);
+            b_score
+                .partial_cmp(&a_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         candidates
     }
 
@@ -189,28 +202,38 @@ impl Providers {
         let wanted = |name: &str| sources.map(|s| s.iter().any(|v| v == name)).unwrap_or(true);
         let query = SearchQuery::from(track);
         let mut jobs: Vec<
-            futures::future::BoxFuture<'_, (&'static str, Result<Vec<LyricsCandidate>>)>,
+            futures::future::BoxFuture<'_, (String, Result<Vec<LyricsCandidate>>)>,
         > = Vec::new();
-        if config.providers.lrclib && wanted("lrclib") {
-            jobs.push(Box::pin(async {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(10),
-                    lrclib::search(&self.client, &query, &config.endpoints.lrclib),
-                )
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时")));
-                ("lrclib", result)
-            }));
-        }
-        if config.providers.netease && wanted("netease") {
-            jobs.push(Box::pin(async {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(14),
-                    netease::search(&self.client, &query, &config.endpoints.netease),
-                )
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时")));
-                ("netease", result)
+        for interface in config.enabled_sources() {
+            if !crate::config::adapter_lyrics(&interface.adapter) || !wanted(&interface.id) {
+                continue;
+            }
+            let interface = interface.clone();
+            let source_id = interface.id.clone();
+            let query = query.clone();
+            jobs.push(Box::pin(async move {
+                let result = match interface.adapter.as_str() {
+                    "lrclib" => tokio::time::timeout(
+                        Duration::from_secs(10),
+                        lrclib::search(&self.client, &query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "netease" => tokio::time::timeout(
+                        Duration::from_secs(14),
+                        netease::search(&self.client, &query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    _ => Ok(Vec::new()),
+                };
+                let result = result.map(|mut items| {
+                    for candidate in &mut items {
+                        candidate.source = source_id.clone();
+                    }
+                    items
+                });
+                (source_id, result)
             }));
         }
         let results = futures::future::join_all(jobs).await;
@@ -224,6 +247,12 @@ impl Providers {
         for item in &mut candidates {
             item.match_score = lyrics_score(track, item);
         }
+        let order: std::collections::HashMap<String, usize> = config
+            .sources
+            .iter()
+            .enumerate()
+            .map(|(index, source)| (source.id.clone(), index))
+            .collect();
         candidates.sort_by(|a, b| {
             b.has_synced
                 .cmp(&a.has_synced)
@@ -232,6 +261,11 @@ impl Providers {
                     b.match_score
                         .partial_cmp(&a.match_score)
                         .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| {
+                    let pa = order.get(&a.source).copied().unwrap_or(usize::MAX);
+                    let pb = order.get(&b.source).copied().unwrap_or(usize::MAX);
+                    pa.cmp(&pb)
                 })
         });
         candidates
@@ -243,10 +277,13 @@ impl Providers {
         source: &str,
         id: &str,
     ) -> Result<LyricsCandidate> {
-        match source {
-            "lrclib" => lrclib::fetch(&self.client, id, &config.endpoints.lrclib).await,
-            "netease" => netease::fetch(&self.client, id, &config.endpoints.netease).await,
-            other => anyhow::bail!("未知歌词源: {other}"),
+        let interface = config
+            .source_by_id(source)
+            .ok_or_else(|| anyhow::anyhow!("未知歌词源: {source}"))?;
+        match interface.adapter.as_str() {
+            "lrclib" => lrclib::fetch(&self.client, id, &interface.base_url).await,
+            "netease" => netease::fetch(&self.client, id, &interface.base_url).await,
+            other => anyhow::bail!("该接口不支持歌词: {other}"),
         }
     }
 }

@@ -27,6 +27,13 @@ pub struct Config {
     /// TagNest at a mirror, reverse proxy, or self-hosted NetEase/MusicBrainz
     /// gateway without rebuilding.
     pub endpoints: ProviderEndpoints,
+    /// User-managed source interfaces. Order is the scrape priority.
+    pub sources: Vec<MusicSource>,
+    /// False means this config predates selectable interfaces and should be
+    /// migrated from providers/endpoints once. An intentionally empty list is
+    /// preserved when this is true.
+    pub sources_initialized: bool,
+    pub theme: String,
     pub auto_match_threshold: f64,
     pub itunes_country: String,
     pub scan_ignore: Vec<String>,
@@ -57,6 +64,9 @@ pub struct LyricsConfig {
     pub embed: bool,
     pub prefer_synced: bool,
     pub overwrite: bool,
+    /// Create a sidecar `.lrc` by default. New installs default to embedding
+    /// only; users can opt in per operation or in settings.
+    pub write_file: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,6 +101,75 @@ impl Default for ProviderEndpoints {
             netease: "https://music.163.com".into(),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MusicSource {
+    pub id: String,
+    pub name: String,
+    /// Parser/adapter: musicbrainz, itunes, deezer, netease, lrclib.
+    pub adapter: String,
+    /// Base URL of this interface (path prefix and query are not allowed).
+    pub base_url: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+impl Default for MusicSource {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            adapter: "netease".into(),
+            base_url: "https://music.163.com".into(),
+            enabled: true,
+        }
+    }
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+pub fn sources_from_legacy(endpoints: &ProviderEndpoints, providers: &ProvidersConfig) -> Vec<MusicSource> {
+    vec![
+        MusicSource {
+            id: "musicbrainz".into(),
+            name: "MusicBrainz".into(),
+            adapter: "musicbrainz".into(),
+            base_url: endpoints.musicbrainz.clone(),
+            enabled: providers.musicbrainz,
+        },
+        MusicSource {
+            id: "itunes".into(),
+            name: "iTunes / Apple Music".into(),
+            adapter: "itunes".into(),
+            base_url: endpoints.itunes.clone(),
+            enabled: providers.itunes,
+        },
+        MusicSource {
+            id: "deezer".into(),
+            name: "Deezer".into(),
+            adapter: "deezer".into(),
+            base_url: endpoints.deezer.clone(),
+            enabled: providers.deezer,
+        },
+        MusicSource {
+            id: "netease".into(),
+            name: "网易云音乐".into(),
+            adapter: "netease".into(),
+            base_url: endpoints.netease.clone(),
+            enabled: providers.netease,
+        },
+        MusicSource {
+            id: "lrclib".into(),
+            name: "LRCLIB".into(),
+            adapter: "lrclib".into(),
+            base_url: endpoints.lrclib.clone(),
+            enabled: providers.lrclib,
+        },
+    ]
 }
 
 impl Default for Config {
@@ -137,6 +216,9 @@ impl Default for Config {
             lyrics: LyricsConfig::default(),
             providers: ProvidersConfig::default(),
             endpoints: ProviderEndpoints::default(),
+            sources: Vec::new(),
+            sources_initialized: false,
+            theme: "emerald".into(),
             auto_match_threshold: 0.62,
             itunes_country: "cn".to_string(),
             scan_ignore: vec![
@@ -159,6 +241,7 @@ impl Default for LyricsConfig {
             embed: true,
             prefer_synced: true,
             overwrite: true,
+            write_file: false,
         }
     }
 }
@@ -256,6 +339,10 @@ impl Config {
         if self.naming_artist_separator.trim().is_empty() {
             self.naming_artist_separator.clear();
         }
+        self.theme = self.theme.trim().to_lowercase();
+        if !matches!(self.theme.as_str(), "emerald" | "ocean" | "violet" | "light") {
+            self.theme = "emerald".into();
+        }
         self.auto_match_threshold = self.auto_match_threshold.clamp(0.0, 1.0);
         self.max_cover_mb = self.max_cover_mb.clamp(1, 50);
 
@@ -267,6 +354,44 @@ impl Config {
         self.endpoints.deezer = sanitize_base_url(&self.endpoints.deezer, &defaults.deezer);
         self.endpoints.lrclib = sanitize_base_url(&self.endpoints.lrclib, &defaults.lrclib);
         self.endpoints.netease = sanitize_base_url(&self.endpoints.netease, &defaults.netease);
+
+        if !self.sources_initialized {
+            self.sources = sources_from_legacy(&self.endpoints, &self.providers);
+            self.sources_initialized = true;
+        }
+        self.normalize_sources();
+    }
+
+    fn normalize_sources(&mut self) {
+        let mut used = std::collections::HashSet::new();
+        for (index, source) in self.sources.iter_mut().enumerate() {
+            source.adapter = source.adapter.trim().to_lowercase();
+            if !matches!(
+                source.adapter.as_str(),
+                "musicbrainz" | "itunes" | "deezer" | "netease" | "lrclib"
+            ) {
+                source.adapter = "netease".into();
+            }
+            source.base_url = sanitize_base_url(
+                &source.base_url,
+                &default_base_for_adapter(&source.adapter),
+            );
+            source.name = source.name.trim().to_string();
+            if source.name.is_empty() {
+                source.name = adapter_label(&source.adapter).to_string();
+            }
+            let mut id = slugify_id(&source.id);
+            if id.is_empty() {
+                id = format!("{}-{}", source.adapter, index + 1);
+            }
+            let mut candidate = id.clone();
+            let mut suffix = 2;
+            while !used.insert(candidate.clone()) {
+                candidate = format!("{id}-{suffix}");
+                suffix += 1;
+            }
+            source.id = candidate;
+        }
     }
 
     /// Effective separator for one multi-value tag field. Empty per-field
@@ -285,6 +410,14 @@ impl Config {
         } else {
             value
         }
+    }
+
+    pub fn source_by_id(&self, id: &str) -> Option<&MusicSource> {
+        self.sources.iter().find(|source| source.id == id)
+    }
+
+    pub fn enabled_sources(&self) -> impl Iterator<Item = &MusicSource> {
+        self.sources.iter().filter(|source| source.enabled)
     }
 
     pub fn naming_separator(&self) -> &str {
@@ -329,6 +462,49 @@ impl Config {
         fs::rename(&tmp, path).with_context(|| format!("保存配置失败: {}", path.display()))?;
         Ok(())
     }
+}
+
+pub fn adapter_label(adapter: &str) -> &'static str {
+    match adapter {
+        "musicbrainz" => "MusicBrainz",
+        "itunes" => "iTunes / Apple Music",
+        "deezer" => "Deezer",
+        "lrclib" => "LRCLIB",
+        _ => "网易云音乐",
+    }
+}
+
+pub fn adapter_metadata(adapter: &str) -> bool {
+    matches!(adapter, "musicbrainz" | "itunes" | "deezer" | "netease")
+}
+
+pub fn adapter_lyrics(adapter: &str) -> bool {
+    matches!(adapter, "lrclib" | "netease")
+}
+
+fn default_base_for_adapter(adapter: &str) -> String {
+    match adapter {
+        "musicbrainz" => "https://musicbrainz.org",
+        "itunes" => "https://itunes.apple.com",
+        "deezer" => "https://api.deezer.com",
+        "lrclib" => "https://lrclib.net",
+        _ => "https://music.163.com",
+    }
+    .to_string()
+}
+
+fn slugify_id(value: &str) -> String {
+    let mut id = String::new();
+    for ch in value.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            id.push(ch.to_ascii_lowercase());
+        } else if ch == '-' || ch == '_' || ch.is_whitespace() {
+            if !matches!(id.chars().last(), Some('-') | Some('_')) {
+                id.push('-');
+            }
+        }
+    }
+    id.trim_matches(|ch| ch == '-' || ch == '_').to_string()
 }
 
 fn sanitize_base_url(value: &str, fallback: &str) -> String {
