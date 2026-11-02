@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080b10">
+  <meta name="description" content="TagNest — NAS 音乐刮削、歌词、重命名与标签管理">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TagNest">
+  <title>TagNest · NAS 音乐管家</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H9v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M9 4h4v16H9z"/><path d="m14.6 5.3 3.8-1 3.1 15.1-3.8 1z"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M20.6 13.4 12 22l-9-9V4h9z"/><circle cx="7.5" cy="7.5" r="1.2"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M7 12h10"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
+    <symbol id="i-wand" viewBox="0 0 24 24"><path d="m4 20 11-11"/><path d="m14 5 1-2 1 2 2 1-2 1-1 2-1-2-2-1z"/><path d="m19 12 .7-1.5.8 1.5 1.5.8-1.5.7-.8 1.5-.7-1.5-1.5-.7z"/></symbol>
+    <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+    <symbol id="i-rename" viewBox="0 0 24 24"><path d="M4 7V5h16v2M12 5v14M8 19h8"/></symbol>
+    <symbol id="i-delimiter" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="10" cy="17" r="1.5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4M18 12H9"/></symbol>
+    <symbol id="i-disc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3a9 9 0 0 1 9 9"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4z"/><path d="M12 9v5M12 17.5v.5"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></symbol>
+    <symbol id="i-translate" viewBox="0 0 24 24"><path d="M4 5h9M8.5 3v2M11 5c-.6 4-2.7 7-6 9M6 9c1.2 2.6 3.2 4.2 6 5"/><path d="m12 20 4-10 4 10M13.5 16h5"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16v4M17 18h4"/></symbol>
+  </svg>
+
+  <section id="login-screen" class="login-screen hidden">
+    <div class="login-orb orb-a"></div>
+    <div class="login-orb orb-b"></div>
+    <form class="login-card" id="login-form">
+      <div class="brand brand-login">
+        <span class="brand-mark"><svg class="icon"><use href="#i-disc"></use></svg></span>
+        <div><strong>TagNest</strong><small>NAS 音乐管家</small></div>
+      </div>
+      <h2>欢迎回来</h2>
+      <p>输入访问密码，继续整理你的音乐库。</p>
+      <label class="field">
+        <span>访问密码</span>
+        <input id="login-password" type="password" autocomplete="current-password" placeholder="TAGNEST_PASSWORD" required>
+      </label>
+      <p class="form-error hidden" id="login-error"></p>
+      <button class="btn btn-primary btn-block" type="submit">进入音乐库</button>
+      <small class="login-foot">密码由 Docker 环境变量 <code>TAGNEST_PASSWORD</code> 设置</small>
+    </form>
+  </section>
+
+  <div id="app-shell" class="shell hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark"><svg class="icon"><use href="#i-disc"></use></svg></span>
+        <div><strong>TagNest</strong><small>音巢 · NAS</small></div>
+      </div>
+      <nav class="nav" aria-label="主导航">
+        <button class="nav-item active" data-view="library"><svg class="icon"><use href="#i-library"></use></svg><span>音乐库</span></button>
+        <button class="nav-item" data-view="rename"><svg class="icon"><use href="#i-rename"></use></svg><span>批量重命名</span></button>
+        <button class="nav-item" data-view="settings"><svg class="icon"><use href="#i-settings"></use></svg><span>设置</span></button>
+      </nav>
+      <div class="sidebar-card">
+        <div class="sidebar-card-head"><span>资料库</span><span class="dot" id="scan-dot"></span></div>
+        <div class="sidebar-metric"><b id="side-tracks">0</b><span>首歌曲</span></div>
+        <div class="sidebar-metric"><b id="side-albums">0</b><span>张专辑</span></div>
+        <div class="scan-mini hidden" id="scan-mini">
+          <div class="scan-mini-label"><span id="scan-phase">扫描中</span><span class="scan-percent-wrap"><span id="scan-percent">0%</span><button class="scan-cancel" id="scan-cancel" type="button">取消</button></span></div>
+          <div class="progress"><i id="scan-bar"></i></div>
+          <div class="scan-file" id="scan-file"></div>
+        </div>
+        <button class="btn btn-soft btn-block" id="side-scan"><svg class="icon"><use href="#i-scan"></use></svg>扫描音乐库</button>
+      </div>
+      <div class="sidebar-bottom">
+        <span class="version">v<span id="app-version">0.1.0</span></span>
+        <button class="icon-btn" id="btn-logout" title="退出登录"><svg class="icon"><use href="#i-logout"></use></svg></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="top-progress hidden" id="top-progress"><i id="top-progress-bar"></i></div>
+      <header class="topbar">
+        <div class="page-heading">
+          <h1 id="page-title">音乐库</h1>
+          <p id="page-subtitle">读取、刮削、翻译、重命名，一处完成。</p>
+        </div>
+        <div class="topbar-actions">
+          <label class="searchbox" id="search-wrap">
+            <svg class="icon"><use href="#i-search"></use></svg>
+            <input id="global-search" type="search" placeholder="搜索标题、歌手、专辑…" autocomplete="off">
+            <kbd>/</kbd>
+          </label>
+          <button class="btn btn-primary" id="btn-scan"><svg class="icon"><use href="#i-scan"></use></svg><span>扫描</span></button>
+          <button class="avatar" id="avatar" title="账户">TN</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="view" id="view-library">
+          <div class="stats-grid" id="stats-grid">
+            <div class="stat-card skeleton"></div><div class="stat-card skeleton"></div><div class="stat-card skeleton"></div><div class="stat-card skeleton"></div>
+          </div>
+
+          <div class="library-panel">
+            <div class="panel-head">
+              <div class="filter-chips" id="filter-chips">
+                <button class="chip active" data-filter="">全部</button>
+                <button class="chip" data-filter="missing">缺标签</button>
+                <button class="chip" data-filter="no_lyrics">无歌词</button>
+                <button class="chip" data-filter="no_cover">无封面</button>
+              </div>
+              <div class="panel-meta">
+                <span id="library-count">0 首</span>
+                <button class="icon-btn" id="btn-refresh" title="刷新"><svg class="icon"><use href="#i-refresh"></use></svg></button>
+              </div>
+            </div>
+
+            <div class="batchbar" id="batchbar">
+              <label class="select-all"><input type="checkbox" id="select-page"><span>全选本页</span></label>
+              <span class="selection-label"><b id="selected-count">0</b> 已选择</span>
+              <div class="batch-actions">
+                <button class="btn btn-sm btn-ghost" id="btn-edit-selected" disabled><svg class="icon"><use href="#i-edit"></use></svg>编辑</button>
+                <button class="btn btn-sm btn-ghost" id="btn-auto-scrape" disabled><svg class="icon"><use href="#i-wand"></use></svg>智能刮削</button>
+                <button class="btn btn-sm btn-ghost" id="btn-lyrics-selected" disabled><svg class="icon"><use href="#i-lyrics"></use></svg>批量歌词</button>
+                <button class="btn btn-sm btn-ghost" id="btn-rename-selected" disabled><svg class="icon"><use href="#i-rename"></use></svg>重命名</button>
+                <button class="btn btn-sm btn-ghost" id="btn-delimiter" disabled><svg class="icon"><use href="#i-delimiter"></use></svg>分隔符</button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="track-table">
+                <thead><tr>
+                  <th class="check-col"><input type="checkbox" id="select-page-head" aria-label="全选"></th>
+                  <th class="cover-col"></th>
+                  <th class="title-col">歌曲</th>
+                  <th class="album-col">专辑</th>
+                  <th class="track-col">音轨</th>
+                  <th class="time-col">时长</th>
+                  <th class="format-col">格式</th>
+                  <th class="status-col">状态</th>
+                  <th class="action-col"></th>
+                </tr></thead>
+                <tbody id="tracks-body"></tbody>
+              </table>
+              <div class="empty-state hidden" id="empty-state">
+                <div class="empty-art"><svg class="icon"><use href="#i-disc"></use></svg></div>
+                <h3 id="empty-title">音乐库还是空的</h3>
+                <p id="empty-text">在设置中填写 NAS 音乐目录，然后点一下扫描。</p>
+                <button class="btn btn-primary" id="empty-action">开始扫描</button>
+              </div>
+            </div>
+
+            <div class="table-footer">
+              <span id="page-range">—</span>
+              <div class="pager">
+                <button class="icon-btn" id="prev-page" title="上一页"><svg class="icon" style="transform:rotate(90deg)"><use href="#i-play"></use></svg></button>
+                <span id="page-number">1 / 1</span>
+                <button class="icon-btn" id="next-page" title="下一页"><svg class="icon" style="transform:rotate(-90deg)"><use href="#i-play"></use></svg></button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view hidden" id="view-rename">
+          <div class="rename-layout">
+            <div class="panel rename-builder">
+              <div class="panel-title"><div><span class="eyebrow">ORGANIZE</span><h2>按标签批量重命名</h2></div><span class="badge" id="rename-selected-count">0 首</span></div>
+              <label class="field">
+                <span>命名模板</span>
+                <input id="rename-template" class="mono" type="text" spellcheck="false">
+                <small>用 <code>/</code> 分目录。数字可写成 <code>{track:02d}</code> 补零。</small>
+              </label>
+              <label class="field">
+                <span>多艺术家连接符</span>
+                <input id="rename-artist-separator" class="mono" type="text" placeholder="默认 , ">
+                <small>作用于 <code>{artist}</code> 和 <code>{artists}</code>，例如 <code>, </code>、<code> &amp; </code>。不能使用 <code>/</code> 等路径字符。</small>
+              </label>
+              <div class="preset-row" id="rename-presets"></div>
+              <div class="variable-palette" id="rename-vars"></div>
+              <div class="panel-actions">
+                <button class="btn btn-ghost" id="rename-preview"><svg class="icon"><use href="#i-refresh"></use></svg>预览结果</button>
+                <button class="btn btn-primary" id="rename-execute" disabled><svg class="icon"><use href="#i-rename"></use></svg>执行重命名</button>
+              </div>
+              <p class="hint">执行前会检查冲突；不会覆盖任何已有文件。歌词文件会跟随音频一起移动。</p>
+            </div>
+            <div class="panel rename-preview-panel">
+              <div class="panel-title"><div><span class="eyebrow">PREVIEW</span><h2>移动预览</h2></div></div>
+              <div id="rename-preview-list" class="rename-preview-list">
+                <div class="empty-inline">在音乐库勾选歌曲后，回到这里预览。</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view hidden" id="view-settings">
+          <div class="settings-grid">
+            <div class="settings-main">
+              <section class="panel settings-section">
+                <div class="panel-title"><div><span class="eyebrow">LIBRARY</span><h2>音乐目录</h2></div></div>
+                <p class="hint">容器内的挂载路径。Docker 中需先把 NAS 音乐目录挂载进来，例如 <code>/music</code>。</p>
+                <div id="roots-list" class="roots-list"></div>
+                <div class="inline-add">
+                  <input id="new-root" type="text" placeholder="/music" spellcheck="false">
+                  <button class="btn btn-soft" id="add-root"><svg class="icon"><use href="#i-plus"></use></svg>添加</button>
+                </div>
+              </section>
+
+              <section class="panel settings-section">
+                <div class="panel-title"><div><span class="eyebrow">TAGS</span><h2>标签与分隔符</h2></div></div>
+                <div class="form-grid">
+                  <label class="field"><span>默认写入分隔符</span><input id="tag-separator" class="mono" type="text" placeholder="; "><small>各字段留空时使用。</small></label>
+                  <label class="field"><span>识别分隔符</span><input id="split-separators" class="mono" type="text" placeholder="; ； 、 | &amp; ,"><small>扫描时按这些字符拆分多值字段。</small></label>
+                </div>
+                <div class="form-grid" style="margin-top:14px">
+                  <label class="field"><span>刮削统一分隔符</span><input id="scrape-separator" class="mono" type="text" placeholder="/"><small>不同音乐源的多个艺术家统一用此连接，默认 <code>/</code>。</small></label>
+                  <label class="field"><span>艺术家列表分隔符</span><input id="sep-artists" class="mono" type="text" placeholder="留空使用默认"><small>写回 ARTISTS 时使用。</small></label>
+                  <label class="field"><span>专辑艺术家分隔符</span><input id="sep-albumartist" class="mono" type="text" placeholder="留空使用默认"></label>
+                  <label class="field"><span>流派分隔符</span><input id="sep-genres" class="mono" type="text" placeholder="留空使用默认"></label>
+                  <label class="field"><span>作曲分隔符</span><input id="sep-composers" class="mono" type="text" placeholder="留空使用默认"></label>
+                  <label class="field"><span>作词分隔符</span><input id="sep-lyricists" class="mono" type="text" placeholder="留空使用默认"></label>
+                  <label class="field"><span>重命名多艺术家默认连接符</span><input id="naming-artist-separator" class="mono" type="text" placeholder="默认 , "><small>用于文件名中的多艺术家；不能使用 / \ : * ? 等路径字符。</small></label>
+                </div>
+                <p class="hint">修改后重新扫描，才能把旧文件中含新分隔符的字段拆开。已有歌曲可用「批量分隔符」立即改写。</p>
+              </section>
+
+              <section class="panel settings-section">
+                <div class="panel-title"><div><span class="eyebrow">LYRICS</span><h2>歌词</h2></div></div>
+                <div class="switch-grid">
+                  <label class="switch-row"><span><b>双语歌词</b><small>原歌词与翻译逐行合并</small></span><input type="checkbox" id="lyrics-bilingual"><i></i></label>
+                  <label class="switch-row"><span><b>嵌入标签</b><small>同时写入音频标签</small></span><input type="checkbox" id="lyrics-embed"><i></i></label>
+                  <label class="switch-row"><span><b>优先同步歌词</b><small>优先选择带时间轴的结果</small></span><input type="checkbox" id="lyrics-synced"><i></i></label>
+                  <label class="switch-row"><span><b>覆盖已有歌词</b><small>批量刮削时替换现有 .lrc</small></span><input type="checkbox" id="lyrics-overwrite"><i></i></label>
+                </div>
+              </section>
+
+              <section class="panel settings-section">
+                <div class="panel-title"><div><span class="eyebrow">SOURCES</span><h2>刮削源</h2></div></div>
+                <div class="switch-grid">
+                  <label class="switch-row"><span><b>MusicBrainz</b><small>开放元数据与 MBID，1 请求/秒</small></span><input type="checkbox" id="p-musicbrainz"><i></i></label>
+                  <label class="switch-row"><span><b>iTunes / Apple Music</b><small>封面与曲目信息，自动回退港台/美区</small></span><input type="checkbox" id="p-itunes"><i></i></label>
+                  <label class="switch-row"><span><b>Deezer</b><small>补充欧洲曲库</small></span><input type="checkbox" id="p-deezer"><i></i></label>
+                  <label class="switch-row"><span><b>LRCLIB</b><small>开源同步歌词</small></span><input type="checkbox" id="p-lrclib"><i></i></label>
+                  <label class="switch-row"><span><b>网易云音乐</b><small>元数据、封面、中文歌词与翻译</small></span><input type="checkbox" id="p-netease"><i></i></label>
+                </div>
+                <div class="form-grid compact">
+                  <label class="field"><span>自动匹配阈值 <b id="threshold-value">62%</b></span><input id="match-threshold" type="range" min="40" max="95" step="1"><small>低于阈值的批量刮削结果会被跳过。</small></label>
+                  <label class="field"><span>iTunes 商店</span><select id="itunes-country"><option value="cn">中国大陆</option><option value="hk">中国香港</option><option value="tw">中国台湾</option><option value="us">美国</option><option value="jp">日本</option><option value="gb">英国</option></select><small>无结果时自动尝试港台/美区。</small></label>
+                </div>
+              </section>
+
+              <section class="panel settings-section" id="endpoint-settings">
+                <div class="panel-title">
+                  <div><span class="eyebrow">API</span><h2>音乐源接口</h2></div>
+                  <div class="header-actions">
+                    <button class="btn btn-sm btn-ghost" id="reset-endpoints" type="button">恢复默认</button>
+                  </div>
+                </div>
+                <p class="hint" style="margin-bottom:12px">只填写基础地址：可带路径前缀，不要带末尾 <code>/</code> 或查询参数。可以指向官方镜像、反向代理或自建网关；保存后立即生效。</p>
+                <div class="form-grid compact">
+                  <label class="field"><span>MusicBrainz</span><input id="ep-musicbrainz" class="mono" type="url" data-default="https://musicbrainz.org" placeholder="https://musicbrainz.org"><small>请求 <code>/ws/2/recording</code></small></label>
+                  <label class="field"><span>Cover Art Archive</span><input id="ep-coverart" class="mono" type="url" data-default="https://coverartarchive.org" placeholder="https://coverartarchive.org"><small>请求 <code>/release/{id}/front-500</code></small></label>
+                  <label class="field"><span>iTunes / Apple Music</span><input id="ep-itunes" class="mono" type="url" data-default="https://itunes.apple.com" placeholder="https://itunes.apple.com"><small>请求 <code>/search</code></small></label>
+                  <label class="field"><span>Deezer</span><input id="ep-deezer" class="mono" type="url" data-default="https://api.deezer.com" placeholder="https://api.deezer.com"><small>请求 <code>/search</code></small></label>
+                  <label class="field"><span>LRCLIB</span><input id="ep-lrclib" class="mono" type="url" data-default="https://lrclib.net" placeholder="https://lrclib.net"><small>请求 <code>/api/get</code>、<code>/api/search</code></small></label>
+                  <label class="field"><span>网易云音乐</span><input id="ep-netease" class="mono" type="url" data-default="https://music.163.com" placeholder="https://music.163.com"><small>请求 <code>/api/search/get</code>、<code>/api/song/detail</code>、<code>/api/song/lyric</code></small></label>
+                </div>
+                <details class="api-paths">
+                  <summary>查看完整接口路径</summary>
+                  <ul>
+                    <li><b>MusicBrainz</b> <code>GET {base}/ws/2/recording?query=…&amp;fmt=json</code></li>
+                    <li><b>Cover Art</b> <code>GET {base}/release/{release-id}/front-500</code></li>
+                    <li><b>iTunes</b> <code>GET {base}/search?term=…&amp;entity=song&amp;country=…</code></li>
+                    <li><b>Deezer</b> <code>GET {base}/search?q=…</code></li>
+                    <li><b>LRCLIB</b> <code>GET {base}/api/get</code> / <code>{base}/api/search</code> / <code>{base}/api/get/{id}</code></li>
+                    <li><b>网易云</b> <code>GET {base}/api/search/get</code> / <code>{base}/api/song/detail</code> / <code>{base}/api/song/lyric</code></li>
+                  </ul>
+                </details>
+              </section>
+            </div>
+
+            <aside class="settings-side">
+              <section class="panel settings-section sticky">
+                <div class="panel-title"><div><span class="eyebrow">SYSTEM</span><h2>运行信息</h2></div></div>
+                <dl class="info-list">
+                  <div><dt>版本</dt><dd id="info-version">—</dd></div>
+                  <div><dt>数据目录</dt><dd id="info-data" class="mono">—</dd></div>
+                  <div><dt>访问密码</dt><dd id="info-auth">—</dd></div>
+                  <div><dt>默认命名</dt><dd id="info-template" class="mono">—</dd></div>
+                </dl>
+                <div class="save-row">
+                  <span class="dirty-dot hidden" id="settings-dirty">有未保存修改</span>
+                  <button class="btn btn-primary" id="save-settings"><svg class="icon"><use href="#i-check"></use></svg>保存设置</button>
+                </div>
+                <p class="hint">保存后立即生效；修改音乐目录后建议重新扫描。</p>
+              </section>
+            </aside>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <nav class="mobile-nav" id="mobile-nav" aria-label="移动端导航">
+      <button class="mobile-nav-item active" data-mobile-view="library">
+        <svg class="icon"><use href="#i-library"></use></svg><span>音乐库</span>
+      </button>
+      <button class="mobile-nav-item" data-mobile-view="rename">
+        <svg class="icon"><use href="#i-rename"></use></svg><span>重命名</span>
+      </button>
+      <button class="mobile-nav-item" data-mobile-view="settings">
+        <svg class="icon"><use href="#i-settings"></use></svg><span>设置</span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <div id="modal-root"></div>
+  <div id="loading-overlay" class="loading-overlay hidden"><span class="spinner"></span><p id="loading-text">处理中…</p></div>
+  <script src="/app.js"></script>
+</body>
+</html>

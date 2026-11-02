@@ -1,0 +1,38 @@
+[package]
+name = "tagnest"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "TagNest — a lightweight NAS music tagger, scraper, lyric fetcher and renamer"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+base64 = "0.22"
+futures = "0.3"
+hmac = "0.12"
+lofty = "0.22"
+rand = "0.8"
+redb = "3"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+strsim = "0.11"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "io-util", "sync", "time", "signal"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+walkdir = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = "s"
+
