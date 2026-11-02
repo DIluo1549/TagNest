@@ -6,7 +6,8 @@
 - **低占用**：空闲时约 15–30 MB 内存（2 个工作线程）
 - **开箱即用**：原生 WebUI 已嵌入二进制，不需要前端构建
 - **Docker 部署**：`docker compose up -d --build` 即可
-
+- 
+![TagNest 音乐库](docs/screenshot-library.png)
 
 ## 功能
 
