@@ -201,23 +201,36 @@ pub async fn search(
     query: &SearchQuery,
     base_url: &str,
 ) -> Result<Vec<LyricsCandidate>> {
-    let mut term = String::new();
-    if !query.artist.is_empty() {
-        term.push_str(&query.artist);
-        term.push(' ');
-    }
-    if !query.title.is_empty() {
-        term.push_str(&query.title);
-    }
-    if term.trim().is_empty() {
+    if query.title.is_empty() {
         return Ok(Vec::new());
     }
+    let mut terms = Vec::new();
+    if !query.artist.is_empty() {
+        terms.push(format!("{} {}", query.artist, query.title));
+    }
+    terms.push(query.title.clone());
+    terms.dedup();
+    for term in terms {
+        let songs = search_songs(client, base_url, &term).await?;
+        let candidates = candidates_from_songs(client, base_url, &songs).await;
+        if !candidates.is_empty() {
+            return Ok(candidates);
+        }
+    }
+    Ok(Vec::new())
+}
+
+async fn search_songs(
+    client: &reqwest::Client,
+    base_url: &str,
+    term: &str,
+) -> Result<Vec<Value>> {
     let response = client
         .get(format!("{base_url}/api/search/get"))
         .query(&[
-            ("s", term.trim()),
+            ("s", term),
             ("type", "1"),
-            ("limit", "10"),
+            ("limit", "15"),
             ("offset", "0"),
         ])
         .header("Referer", referer(base_url))
@@ -228,13 +241,20 @@ pub async fn search(
         anyhow::bail!("网易云音乐返回 HTTP {}", response.status());
     }
     let body: Value = response.json().await.context("解析网易云音乐响应失败")?;
-    let songs = body
+    Ok(body
         .pointer("/result/songs")
         .and_then(|v| v.as_array())
         .cloned()
-        .unwrap_or_default();
+        .unwrap_or_default())
+}
+
+async fn candidates_from_songs(
+    client: &reqwest::Client,
+    base_url: &str,
+    songs: &[Value],
+) -> Vec<LyricsCandidate> {
     let mut out = Vec::new();
-    for song in songs.iter().take(6) {
+    for song in songs.iter().take(10) {
         let id = song
             .get("id")
             .map(|v| {
@@ -281,7 +301,7 @@ pub async fn search(
         candidate.preview = make_preview(&candidate.synced_lyrics, &candidate.plain_lyrics);
         out.push(candidate);
     }
-    Ok(out)
+    out
 }
 
 pub async fn fetch(client: &reqwest::Client, id: &str, base_url: &str) -> Result<LyricsCandidate> {

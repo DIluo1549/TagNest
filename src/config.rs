@@ -33,6 +33,8 @@ pub struct Config {
     /// migrated from providers/endpoints once. An intentionally empty list is
     /// preserved when this is true.
     pub sources_initialized: bool,
+    /// Internal migration marker for interfaces added in later releases.
+    pub sources_version: u32,
     pub theme: String,
     pub auto_match_threshold: f64,
     pub itunes_country: String,
@@ -163,11 +165,58 @@ pub fn sources_from_legacy(endpoints: &ProviderEndpoints, providers: &ProvidersC
             enabled: providers.netease,
         },
         MusicSource {
+            id: "qq".into(),
+            name: "QQ 音乐".into(),
+            adapter: "qq".into(),
+            base_url: "https://c.y.qq.com".into(),
+            enabled: true,
+        },
+        MusicSource {
+            id: "kugou".into(),
+            name: "酷狗音乐".into(),
+            adapter: "kugou".into(),
+            base_url: "http://mobilecdn.kugou.com".into(),
+            enabled: true,
+        },
+        MusicSource {
+            id: "kuwo".into(),
+            name: "酷我音乐".into(),
+            adapter: "kuwo".into(),
+            base_url: "http://search.kuwo.cn".into(),
+            enabled: true,
+        },
+        MusicSource {
             id: "lrclib".into(),
             name: "LRCLIB".into(),
             adapter: "lrclib".into(),
             base_url: endpoints.lrclib.clone(),
             enabled: providers.lrclib,
+        },
+    ]
+}
+
+fn default_new_sources() -> Vec<MusicSource> {
+    vec![
+        MusicSource {
+            id: "qq".into(),
+            name: "QQ 音乐".into(),
+            adapter: "qq".into(),
+            base_url: "https://c.y.qq.com".into(),
+            enabled: true,
+        },
+        MusicSource {
+            id: "kugou".into(),
+            name: "酷狗音乐".into(),
+            adapter: "kugou".into(),
+            base_url: "http://mobilecdn.kugou.com".into(),
+            enabled: true,
+        },
+        MusicSource {
+            id: "kuwo".into(),
+            name: "酷我音乐".into(),
+            adapter: "kuwo".into(),
+            base_url: "http://search.kuwo.cn".into(),
+            enabled: true,
         },
     ]
 }
@@ -218,6 +267,7 @@ impl Default for Config {
             endpoints: ProviderEndpoints::default(),
             sources: Vec::new(),
             sources_initialized: false,
+            sources_version: 0,
             theme: "emerald".into(),
             auto_match_threshold: 0.62,
             itunes_country: "cn".to_string(),
@@ -358,6 +408,15 @@ impl Config {
         if !self.sources_initialized {
             self.sources = sources_from_legacy(&self.endpoints, &self.providers);
             self.sources_initialized = true;
+            self.sources_version = 3;
+        }
+        if self.sources_version < 3 {
+            for source in default_new_sources() {
+                if !self.sources.iter().any(|item| item.adapter == source.adapter) {
+                    self.sources.push(source);
+                }
+            }
+            self.sources_version = 3;
         }
         self.normalize_sources();
     }
@@ -368,7 +427,7 @@ impl Config {
             source.adapter = source.adapter.trim().to_lowercase();
             if !matches!(
                 source.adapter.as_str(),
-                "musicbrainz" | "itunes" | "deezer" | "netease" | "lrclib"
+                "musicbrainz" | "itunes" | "deezer" | "netease" | "qq" | "kugou" | "kuwo" | "lrclib"
             ) {
                 source.adapter = "netease".into();
             }
@@ -469,17 +528,20 @@ pub fn adapter_label(adapter: &str) -> &'static str {
         "musicbrainz" => "MusicBrainz",
         "itunes" => "iTunes / Apple Music",
         "deezer" => "Deezer",
+        "qq" => "QQ 音乐",
+        "kugou" => "酷狗音乐",
+        "kuwo" => "酷我音乐",
         "lrclib" => "LRCLIB",
         _ => "网易云音乐",
     }
 }
 
 pub fn adapter_metadata(adapter: &str) -> bool {
-    matches!(adapter, "musicbrainz" | "itunes" | "deezer" | "netease")
+    matches!(adapter, "musicbrainz" | "itunes" | "deezer" | "netease" | "qq" | "kugou" | "kuwo")
 }
 
 pub fn adapter_lyrics(adapter: &str) -> bool {
-    matches!(adapter, "lrclib" | "netease")
+    matches!(adapter, "lrclib" | "netease" | "qq" | "kugou" | "kuwo")
 }
 
 fn default_base_for_adapter(adapter: &str) -> String {
@@ -487,6 +549,9 @@ fn default_base_for_adapter(adapter: &str) -> String {
         "musicbrainz" => "https://musicbrainz.org",
         "itunes" => "https://itunes.apple.com",
         "deezer" => "https://api.deezer.com",
+        "qq" => "https://c.y.qq.com",
+        "kugou" => "http://mobilecdn.kugou.com",
+        "kuwo" => "http://search.kuwo.cn",
         "lrclib" => "https://lrclib.net",
         _ => "https://music.163.com",
     }

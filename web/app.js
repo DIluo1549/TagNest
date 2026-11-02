@@ -568,7 +568,7 @@ function updateSelectionUI() {
   const count = state.selected.size;
   $('#selected-count').textContent = fmtNumber(count);
   $('#batchbar').classList.toggle('has-selection', count > 0);
-  const buttons = ['#btn-edit-selected', '#btn-auto-scrape', '#btn-lyrics-selected', '#btn-rename-selected', '#btn-delimiter'];
+  const buttons = ['#btn-edit-selected', '#btn-auto-scrape', '#btn-lyrics-selected', '#btn-rename-selected', '#btn-delimiter', '#btn-clear-fields'];
   buttons.forEach((selector) => { $(selector).disabled = count === 0; });
   $('#btn-edit-selected').disabled = count !== 1;
   const pageIds = state.tracks.map((track) => track.id);
@@ -774,6 +774,9 @@ const SOURCE_ADAPTERS = [
   ['itunes', 'iTunes / Apple Music'],
   ['deezer', 'Deezer'],
   ['netease', '网易云音乐'],
+  ['qq', 'QQ 音乐'],
+  ['kugou', '酷狗音乐'],
+  ['kuwo', '酷我音乐'],
   ['lrclib', 'LRCLIB'],
 ];
 const SOURCE_ADAPTER_DEFAULTS = {
@@ -781,6 +784,9 @@ const SOURCE_ADAPTER_DEFAULTS = {
   itunes: 'https://itunes.apple.com',
   deezer: 'https://api.deezer.com',
   netease: 'https://music.163.com',
+  qq: 'https://c.y.qq.com',
+  kugou: 'http://mobilecdn.kugou.com',
+  kuwo: 'http://search.kuwo.cn',
   lrclib: 'https://lrclib.net',
 };
 const DEFAULT_SOURCES = [
@@ -788,6 +794,9 @@ const DEFAULT_SOURCES = [
   { id: 'itunes', name: 'iTunes / Apple Music', adapter: 'itunes', base_url: SOURCE_ADAPTER_DEFAULTS.itunes, enabled: true },
   { id: 'deezer', name: 'Deezer', adapter: 'deezer', base_url: SOURCE_ADAPTER_DEFAULTS.deezer, enabled: true },
   { id: 'netease', name: '网易云音乐', adapter: 'netease', base_url: SOURCE_ADAPTER_DEFAULTS.netease, enabled: true },
+  { id: 'qq', name: 'QQ 音乐', adapter: 'qq', base_url: SOURCE_ADAPTER_DEFAULTS.qq, enabled: true },
+  { id: 'kugou', name: '酷狗音乐', adapter: 'kugou', base_url: SOURCE_ADAPTER_DEFAULTS.kugou, enabled: true },
+  { id: 'kuwo', name: '酷我音乐', adapter: 'kuwo', base_url: SOURCE_ADAPTER_DEFAULTS.kuwo, enabled: true },
   { id: 'lrclib', name: 'LRCLIB', adapter: 'lrclib', base_url: SOURCE_ADAPTER_DEFAULTS.lrclib, enabled: true },
 ];
 
@@ -808,7 +817,7 @@ function sourceAdapterLabel(adapter) {
 }
 
 function sourceKind(adapter) {
-  if (adapter === 'netease') return '元数据 + 歌词';
+  if (['netease', 'qq', 'kugou', 'kuwo'].includes(adapter)) return '元数据 + 歌词';
   if (adapter === 'lrclib') return '歌词';
   return '元数据';
 }
@@ -1312,6 +1321,10 @@ async function openLyricsForTrack(id) {
   state.lyricsCandidates = [];
   state.activeLyric = 0;
   const body = `
+    <div class="lyrics-player">
+      <div class="lyrics-player-title"><b>${escapeHtml(track.title || track.filename)}</b><span>${escapeHtml(track.artist || '未知歌手')} · ${escapeHtml(track.duration || '0:00')}</span></div>
+      <audio id="lyrics-audio" controls preload="metadata" src="/api/tracks/${id}/stream"></audio>
+    </div>
     <div class="lyrics-layout">
       <div class="lyrics-preview-pane">
         <div class="pane-head"><span>原文件歌词</span><span id="lyrics-status">${track.has_lyrics ? '已有歌词' : '尚无歌词'}</span></div>
@@ -1321,7 +1334,7 @@ async function openLyricsForTrack(id) {
         <div class="pane-head"><span>搜索结果</span><button class="btn btn-sm btn-ghost" id="search-lyrics">${icon('search')}重新搜索</button></div>
         <div id="lyrics-results" style="overflow:auto;max-height:300px"><div class="modal-loading"><span class="spinner"></span><span>搜索同步歌词与翻译…</span></div></div>
         <div class="candidate-preview-head"><span>选中结果预览</span><span id="lyric-candidate-status">未选择</span></div>
-        <pre class="lyric-candidate-full" id="lyric-candidate-preview">选择右侧搜索结果后在这里预览，不会覆盖左侧原歌词。</pre>
+        <div class="lyric-candidate-full" id="lyric-candidate-preview">选择右侧搜索结果后在这里预览，不会覆盖左侧原歌词。</div>
       </div>
     </div>
     <div class="lyrics-options">
@@ -1334,6 +1347,13 @@ async function openLyricsForTrack(id) {
   openModal({ title: '歌词刮削', subtitle: `${track.title || track.filename} · ${track.artist || '未知歌手'}`, body, footer, wide: true });
   $('#search-lyrics').addEventListener('click', () => searchLyricsForTrack(id));
   $('#apply-lyric').addEventListener('click', () => applySelectedLyrics(id));
+  $('#lyrics-bilingual-opt').addEventListener('change', () => renderLyricPreview());
+  const audio = $('#lyrics-audio');
+  if (audio) {
+    ['timeupdate', 'seeked', 'play', 'loadedmetadata'].forEach((event) => {
+      audio.addEventListener(event, updateLyricHighlight);
+    });
+  }
   $('#lyrics-file-opt').addEventListener('change', (event) => {
     if (!event.target.checked) $('#lyrics-embed-opt').checked = true;
   });
@@ -1401,24 +1421,119 @@ function renderLyricCandidates(trackId) {
   renderLyricPreview();
 }
 
+function lyricTimestamp(line) {
+  const match = line.match(/\[(\d{1,3}):(\d{2}(?:\.\d{1,3})?)\]/);
+  if (!match) return null;
+  return Math.round((Number(match[1]) * 60 + Number(match[2])) * 1000);
+}
+
+function lyricText(line) {
+  return line.replace(/\[[^\]]*\]/g, '').trim();
+}
+
+function mergeLyricsForPreview(original, translated) {
+  if (!translated.trim()) return original;
+  const originalLines = original.split('\n');
+  const hasTimestamps = originalLines.some((line) => lyricTimestamp(line) !== null);
+  if (!hasTimestamps) {
+    const translations = translated.split('\n').map(lyricText);
+    let index = 0;
+    return originalLines.map((line) => {
+      const out = [line];
+      while (index < translations.length && !translations[index]) index += 1;
+      if (index < translations.length) {
+        out.push(translations[index]);
+        index += 1;
+      }
+      return out.join('\n');
+    }).join('\n');
+  }
+  const translations = [];
+  for (const line of translated.split('\n')) {
+    const ms = lyricTimestamp(line);
+    const text = lyricText(line);
+    if (ms !== null && text) translations.push({ ms, text });
+  }
+  if (!translations.length) return original;
+  const nearest = (ms) => {
+    let best = null;
+    let distance = 351;
+    for (const item of translations) {
+      const diff = Math.abs(item.ms - ms);
+      if (diff < distance) {
+        distance = diff;
+        best = item;
+      }
+    }
+    return best;
+  };
+  return originalLines.map((line) => {
+    const ms = lyricTimestamp(line);
+    const text = lyricText(line);
+    if (ms === null || !text) return line;
+    const match = nearest(ms);
+    if (!match) return line;
+    const prefix = line.match(/^((?:\[[^\]]+\])+)/)?.[1] || '';
+    return `${line}\n${prefix}${match.text}`;
+  }).join('\n');
+}
+
+function renderLyricLines(target, text) {
+  target.innerHTML = '';
+  target.dataset.activeMs = '';
+  text.split('\n').forEach((line) => {
+    const node = document.createElement('div');
+    node.className = 'lyric-line';
+    node.textContent = line || ' ';
+    const ms = lyricTimestamp(line);
+    if (ms !== null) node.dataset.ms = String(ms);
+    target.appendChild(node);
+  });
+}
+
+function updateLyricHighlight() {
+  const target = $('#lyric-candidate-preview');
+  const audio = $('#lyrics-audio');
+  if (!target || !audio) return;
+  const lines = $$('.lyric-line', target);
+  if (!lines.length) return;
+  const currentMs = (audio.currentTime || 0) * 1000;
+  let best = null;
+  for (const line of lines) {
+    if (!line.dataset.ms) continue;
+    const ms = Number(line.dataset.ms);
+    if (ms <= currentMs + 80 && (best === null || ms >= best)) best = ms;
+  }
+  let firstActive = null;
+  lines.forEach((line) => {
+    const active = best !== null && Number(line.dataset.ms) === best;
+    line.classList.toggle('active', active);
+    if (active && !firstActive) firstActive = line;
+  });
+  const activeKey = best === null ? '' : String(best);
+  if (firstActive && target.dataset.activeMs !== activeKey) {
+    target.dataset.activeMs = activeKey;
+    target.scrollTo({
+      top: Math.max(0, firstActive.offsetTop - target.clientHeight / 2),
+      behavior: 'smooth',
+    });
+  }
+}
+
 function renderLyricPreview() {
   const candidate = state.lyricsCandidates[state.activeLyric];
   if (!candidate) return;
   const bilingual = $('#lyrics-bilingual-opt')?.checked;
   const original = candidate.synced_lyrics || candidate.plain_lyrics || '';
   const translated = candidate.translated_lyrics || '';
-  let preview = original;
-  if (bilingual && translated) {
-    const lines = original.split('\n');
-    const trans = translated.split('\n');
-    preview = lines.map((line, index) => `${line}${trans[index] ? `\n${trans[index]}` : ''}`).join('\n');
-  }
+  const preview = bilingual ? mergeLyricsForPreview(original, translated) : original;
   const target = $('#lyric-candidate-preview');
-  if (target) target.textContent = preview || '（空）';
+  if (target) renderLyricLines(target, preview || '（空）');
   const status = $('#lyric-candidate-status');
   if (status) {
     status.textContent = `${providerLabel(candidate.source)} · ${candidate.has_synced ? '同步歌词' : '纯文本'} · ${pct(candidate.match_score)}`;
   }
+  updateLyricHighlight();
 }
 
 async function applySelectedLyrics(trackId) {
@@ -1471,6 +1586,10 @@ function openBatchLyricsDialog(ids) {
         <input type="checkbox" id="batch-lyrics-embed" ${state.settings?.config?.lyrics?.embed ? 'checked' : ''}>
         嵌入音频标签
       </label>
+      <label class="check-label" style="margin-top:10px">
+        <input type="checkbox" id="batch-lyrics-bilingual" ${state.settings?.config?.lyrics?.bilingual ? 'checked' : ''}>
+        双语合并
+      </label>
       <p class="hint" style="margin-top:8px">不新建文件时必须嵌入标签；两者都勾选会同时写入文件和标签。</p>
     </div>`;
   const footer = `<button class="btn btn-ghost" data-close-modal>取消</button><button class="btn btn-primary" id="batch-lyrics-start">${icon('lyrics')}开始刮削</button>`;
@@ -1487,18 +1606,20 @@ function openBatchLyricsDialog(ids) {
   $('#batch-lyrics-start').addEventListener('click', () => {
     let writeFile = $('#batch-lyrics-file').checked;
     let embed = $('#batch-lyrics-embed').checked;
+    const bilingual = $('#batch-lyrics-bilingual').checked;
     if (!writeFile && !embed) {
       embed = true;
       $('#batch-lyrics-embed').checked = true;
     }
     closeModal();
-    batchLyrics(ids, { writeFile, embed });
+    batchLyrics(ids, { writeFile, embed, bilingual });
   });
 }
 
 async function batchLyrics(ids, options = {}) {
   if (!ids.length) return;
   const writeFile = options.writeFile ?? !!state.settings?.config?.lyrics?.write_file;
+  const bilingual = options.bilingual ?? !!state.settings?.config?.lyrics?.bilingual;
   let embed = options.embed ?? (state.settings?.config?.lyrics?.embed ?? true);
   if (!writeFile && !embed) embed = true;
   const targets = ids.slice(0, 50);
@@ -1551,7 +1672,7 @@ async function batchLyrics(ids, options = {}) {
         method: 'POST',
         body: {
           ids: [id],
-          bilingual: state.settings?.config?.lyrics?.bilingual ?? true,
+          bilingual,
           embed,
           write_file: writeFile,
           overwrite: state.settings?.config?.lyrics?.overwrite ?? true,
@@ -1575,6 +1696,147 @@ async function batchLyrics(ids, options = {}) {
     targets.length,
     failures,
     '写入',
+  );
+  if (cancelled) toast(`已停止，完成 ${updated} 首`, 'warn');
+  await Promise.all([loadTracks(), loadStats()]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Clear metadata fields                                               */
+/* ------------------------------------------------------------------ */
+const CLEAR_FIELD_GROUPS = [
+  {
+    label: '艺术家 / 专辑',
+    fields: [
+      ['artist', '显示艺术家（ARTIST）'], ['artists', '艺术家列表（ARTISTS）'],
+      ['albumartist', '专辑艺术家'], ['album', '专辑'],
+    ],
+  },
+  {
+    label: '曲目信息',
+    fields: [
+      ['track', '音轨号'], ['track_total', '音轨总数'], ['disc', '碟号'],
+      ['disc_total', '碟总数'], ['date', '日期'], ['year', '年份'], ['genres', '流派'],
+    ],
+  },
+  {
+    label: '出版 / 其他',
+    fields: [
+      ['composers', '作曲'], ['lyricists', '作词'], ['comment', '注释'],
+      ['bpm', 'BPM'], ['isrc', 'ISRC'], ['label', '唱片公司'], ['catalog_number', '目录号'],
+    ],
+  },
+  {
+    label: 'MusicBrainz',
+    fields: [
+      ['mb_track_id', '录音 ID'], ['mb_album_id', '专辑 ID'], ['mb_artist_id', '艺术家 ID'],
+    ],
+  },
+];
+
+function clearFieldsHtml() {
+  return `
+    <div class="scrape-field-groups">
+      ${CLEAR_FIELD_GROUPS.map((group) => `
+        <div class="scrape-field-group">
+          <b>${escapeHtml(group.label)}</b>
+          <div class="scrape-field-list">
+            ${group.fields.map(([value, label]) => `
+              <label class="check-label check-mini">
+                <input type="checkbox" data-clear-field value="${value}">${escapeHtml(label)}
+              </label>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function openClearFieldsDialog(ids) {
+  if (!ids.length) return;
+  const body = `
+    <div class="batch-summary">
+      <div class="summary-number">${fmtNumber(ids.length)}<small> 首</small></div>
+      <p class="hint">清空所选歌曲的指定元数据字段；未勾选的字段保持不变。</p>
+      <div class="scrape-fields-head" style="margin-top:14px">
+        <b>要清空的字段</b>
+        <button class="btn btn-sm btn-ghost" id="clear-fields-all" type="button">全选</button>
+        <button class="btn btn-sm btn-ghost" id="clear-fields-none" type="button">全不选</button>
+      </div>
+      ${clearFieldsHtml()}
+      <p class="hint" style="color:var(--warn)">清空会直接重写音频标签，且无法撤销；请确认后执行。</p>
+    </div>`;
+  const footer = `<button class="btn btn-ghost" data-close-modal>取消</button><button class="btn btn-danger" id="clear-fields-start">${icon('trash')}清空所选字段</button>`;
+  openModal({ title: '批量清空元数据', subtitle: '只清空勾选的字段', body, footer, wide: true });
+  $('#clear-fields-all').addEventListener('click', () => {
+    $$('[data-clear-field]').forEach((input) => { input.checked = true; });
+  });
+  $('#clear-fields-none').addEventListener('click', () => {
+    $$('[data-clear-field]').forEach((input) => { input.checked = false; });
+  });
+  $('#clear-fields-start').addEventListener('click', () => {
+    const fields = $$('[data-clear-field]:checked').map((input) => input.value);
+    if (!fields.length) {
+      toast('请至少选择一个要清空的字段', 'warn');
+      return;
+    }
+    closeModal();
+    runClearFieldsJob(ids, fields);
+  });
+}
+
+async function runClearFieldsJob(ids, fields) {
+  let cancelled = false;
+  let done = 0;
+  let updated = 0;
+  const failures = [];
+  const targets = [...ids];
+  openModal({
+    title: '正在清空元数据',
+    subtitle: `${targets.length} 首歌曲`,
+    body: `
+      <div class="auto-job">
+        <div class="auto-job-top"><span id="clear-current">准备中…</span><b id="clear-count">0 / ${targets.length}</b></div>
+        <div class="progress"><i id="clear-bar"></i></div>
+        <p class="hint" id="clear-hint">可随时停止；当前歌曲会先完成。</p>
+      </div>`,
+    footer: `<button class="btn btn-danger" id="clear-stop">${icon('close')}停止</button>`,
+    locked: true,
+  });
+  $('#clear-stop').addEventListener('click', () => {
+    cancelled = true;
+    const button = $('#clear-stop');
+    if (button) { button.disabled = true; button.textContent = '正在停止…'; }
+    const hint = $('#clear-hint');
+    if (hint) hint.textContent = '将在当前歌曲处理完成后停止。';
+  });
+  const update = () => {
+    $('#clear-count').textContent = `${done} / ${targets.length}`;
+    $('#clear-bar').style.width = `${Math.round((done / targets.length) * 100)}%`;
+  };
+  for (const id of targets) {
+    if (cancelled) break;
+    const track = state.trackMap.get(id);
+    const current = $('#clear-current');
+    if (current) current.textContent = `正在清空：${track ? (track.title || track.filename) : `#${id}`}`;
+    try {
+      const result = await api('/api/tracks/clear', {
+        method: 'POST',
+        body: { ids: [id], fields },
+      });
+      updated += result.updated || 0;
+      for (const error of result.errors || []) failures.push(error);
+    } catch (error) {
+      failures.push({ id, message: error.message });
+    }
+    done += 1;
+    update();
+  }
+  closeModal();
+  showBatchResult(
+    cancelled ? '批量清空已停止' : '批量清空元数据',
+    updated,
+    targets.length,
+    failures,
+    '清空',
   );
   if (cancelled) toast(`已停止，完成 ${updated} 首`, 'warn');
   await Promise.all([loadTracks(), loadStats()]);
@@ -1883,6 +2145,7 @@ function wireEvents() {
   });
   $('#btn-rename-selected').addEventListener('click', () => setView('rename'));
   $('#btn-delimiter').addEventListener('click', () => openDelimiterModal(selectedIds()));
+  $('#btn-clear-fields').addEventListener('click', () => openClearFieldsDialog(selectedIds()));
   $('#btn-logout').addEventListener('click', async () => {
     await api('/api/auth/logout', { method: 'POST', body: {} }).catch(() => {});
     showLogin();

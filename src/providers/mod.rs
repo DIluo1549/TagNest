@@ -1,8 +1,11 @@
 pub mod deezer;
 pub mod itunes;
+pub mod kugou;
+pub mod kuwo;
 pub mod lrclib;
 pub mod musicbrainz;
 pub mod netease;
+pub mod qq;
 
 use crate::config::Config;
 use crate::models::Track;
@@ -153,6 +156,24 @@ impl Providers {
                     )
                     .await
                     .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "qq" => tokio::time::timeout(
+                        Duration::from_secs(12),
+                        qq::search_metadata(&self.client, query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "kugou" => tokio::time::timeout(
+                        Duration::from_secs(12),
+                        kugou::search_metadata(&self.client, query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "kuwo" => tokio::time::timeout(
+                        Duration::from_secs(15),
+                        kuwo::search_metadata(&self.client, query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
                     _ => Ok(Vec::new()),
                 };
                 let result = result.map(|mut items| {
@@ -225,6 +246,24 @@ impl Providers {
                     )
                     .await
                     .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "qq" => tokio::time::timeout(
+                        Duration::from_secs(14),
+                        qq::search(&self.client, &query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "kugou" => tokio::time::timeout(
+                        Duration::from_secs(15),
+                        kugou::search(&self.client, &query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
+                    "kuwo" => tokio::time::timeout(
+                        Duration::from_secs(18),
+                        kuwo::search(&self.client, &query, &interface.base_url),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("请求超时"))),
                     _ => Ok(Vec::new()),
                 };
                 let result = result.map(|mut items| {
@@ -283,6 +322,9 @@ impl Providers {
         match interface.adapter.as_str() {
             "lrclib" => lrclib::fetch(&self.client, id, &interface.base_url).await,
             "netease" => netease::fetch(&self.client, id, &interface.base_url).await,
+            "qq" => qq::fetch(&self.client, id, &interface.base_url).await,
+            "kugou" => kugou::fetch(&self.client, id, &interface.base_url).await,
+            "kuwo" => kuwo::fetch(&self.client, id, &interface.base_url).await,
             other => anyhow::bail!("该接口不支持歌词: {other}"),
         }
     }

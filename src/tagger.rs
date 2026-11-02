@@ -6,7 +6,7 @@ use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, FileType, TaggedFileExt};
 use lofty::picture::{Picture, PictureType};
 use lofty::prelude::{Accessor, ItemKey, TagExt};
-use lofty::tag::Tag;
+use lofty::tag::{ItemValue, Tag, TagItem};
 use std::io::Cursor;
 use std::path::Path;
 
@@ -65,7 +65,7 @@ pub fn read_metadata(path: &Path, config: &Config) -> Result<Track> {
         let artist_refs: Vec<&str> = raw_artists.iter().map(String::as_str).collect();
         track.artists = split_field(&artist_refs, config, "artists");
         track.artist = if display_artist.is_empty() {
-            track.artists.join(config.separator_for("artists"))
+            track.artists.join(&config.scrape_separator)
         } else {
             display_artist
         };
@@ -197,11 +197,9 @@ pub fn write_metadata(
         set_text(&mut tag, ItemKey::TrackArtist, &track.artist);
     }
     if wants("artists") {
-        set_text(
-            &mut tag,
-            ItemKey::TrackArtists,
-            &join_values(&track.artists, field_separator(extra, config, "artists")),
-        );
+        // ARTISTS is a multi-value tag: write one value per artist instead of
+        // joining everything into a single "A/B" string.
+        set_multi_text(&mut tag, ItemKey::TrackArtists, &track.artists);
     }
     if wants("albumartist") {
         set_text(
@@ -383,6 +381,19 @@ fn set_text(tag: &mut Tag, key: ItemKey, value: &str) {
         tag.remove_key(&key);
     } else {
         tag.insert_text(key, value.to_string());
+    }
+}
+
+fn set_multi_text(tag: &mut Tag, key: ItemKey, values: &[String]) {
+    tag.remove_key(&key);
+    for value in values {
+        let value = value.trim();
+        if !value.is_empty() {
+            let _ = tag.push(TagItem::new(
+                key.clone(),
+                ItemValue::Text(value.to_string()),
+            ));
+        }
     }
 }
 

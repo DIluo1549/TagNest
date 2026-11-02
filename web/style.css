@@ -682,11 +682,28 @@ tr:hover .row-actions { opacity: 1; }
 }
 .candidate-preview-head #lyric-candidate-status { color: var(--accent); }
 .lyric-candidate-full {
-  margin: 0; padding: 11px 12px; min-height: 120px; max-height: 190px; overflow: auto;
+  margin: 0; padding: 8px 10px; min-height: 120px; max-height: 260px; overflow: auto;
   border: 1px solid var(--line); border-radius: 10px; background: rgba(0,0,0,0.16);
   color: var(--muted); font-family: var(--mono); font-size: 11.5px; line-height: 1.75;
-  white-space: pre-wrap;
+  white-space: normal;
 }
+.lyric-line { padding: 2px 6px; border-radius: 5px; transition: background 120ms ease, color 120ms ease; }
+.lyric-line.active {
+  color: var(--text); background: rgba(114, 230, 177, 0.13);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+html[data-theme="light"] .lyric-line.active {
+  background: rgba(15, 159, 116, 0.12);
+}
+.lyrics-player {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 14px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.025);
+}
+.lyrics-player-title { display: flex; flex-direction: column; gap: 3px; min-width: 140px; max-width: 270px; }
+.lyrics-player-title b { font-size: 12.5px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lyrics-player-title span { color: var(--muted-2); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lyrics-player audio { flex: 1; min-width: 0; height: 34px; }
+html[data-theme="light"] .lyrics-player { background: #f7faf8; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {
@@ -793,8 +810,10 @@ tr:hover .row-actions { opacity: 1; }
   .score-pill { flex-direction: row; align-items: center; margin-left: 49px; }
   .candidate-actions .btn span { display: none; }
   .lyrics-layout { min-height: 0; }
+  .lyrics-player { flex-direction: column; align-items: stretch; gap: 7px; }
+  .lyrics-player-title { max-width: none; }
   .lyrics-content { max-height: 220px; min-height: 160px; }
-  .lyric-candidate-full { max-height: 150px; min-height: 90px; }
+  .lyric-candidate-full { max-height: 180px; min-height: 90px; }
   .lyrics-options { gap: 10px; }
   .scrape-field-groups { grid-template-columns: 1fr; }
   .source-row { padding: 10px; gap: 7px; }

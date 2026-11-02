@@ -83,6 +83,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/stats", get(stats))
         .route("/api/tracks", get(list_tracks))
         .route("/api/tracks/normalize", post(normalize_tags))
+        .route("/api/tracks/clear", post(clear_fields))
         .route("/api/tracks/{id}", get(get_track).patch(update_track))
         .route("/api/tracks/{id}/cover", get(get_cover))
         .route("/api/tracks/{id}/stream", get(stream_track))
@@ -443,6 +444,144 @@ async fn normalize_tags(
     Ok(Json(json!({ "updated": updated, "errors": errors })))
 }
 
+#[derive(Deserialize)]
+struct ClearFieldsRequest {
+    ids: Vec<u64>,
+    fields: Vec<String>,
+}
+
+async fn clear_fields(
+    State(state): State<AppState>,
+    Json(body): Json<ClearFieldsRequest>,
+) -> ApiResult<Json<Value>> {
+    if body.ids.is_empty() {
+        return Err(ApiError::bad("请选择歌曲"));
+    }
+    if body.fields.is_empty() {
+        return Err(ApiError::bad("请选择要清空的字段"));
+    }
+    let allowed: HashSet<&str> = [
+        "artist",
+        "artists",
+        "albumartist",
+        "album",
+        "track",
+        "track_total",
+        "disc",
+        "disc_total",
+        "date",
+        "year",
+        "genres",
+        "composers",
+        "lyricists",
+        "comment",
+        "bpm",
+        "isrc",
+        "label",
+        "catalog_number",
+        "mb_track_id",
+        "mb_album_id",
+        "mb_artist_id",
+    ]
+    .into_iter()
+    .collect();
+    let fields: HashSet<String> = body
+        .fields
+        .iter()
+        .filter(|field| allowed.contains(field.as_str()))
+        .cloned()
+        .collect();
+    if fields.is_empty() {
+        return Err(ApiError::bad("没有可清空的字段"));
+    }
+    let config = state.config();
+    let mut extra = WriteOptionsExtra {
+        only_fields: Some(fields.clone()),
+        ..Default::default()
+    };
+    extra.replace_cover = false;
+    let mut updated = 0usize;
+    let mut errors = Vec::new();
+    for id in body.ids.iter().take(500) {
+        let Some(mut track) = state.store.get(*id).map_err(ApiError::internal)? else {
+            errors.push(json!({ "id": id, "error": "歌曲不存在" }));
+            continue;
+        };
+        if fields.contains("artist") {
+            track.artist.clear();
+        }
+        if fields.contains("artists") {
+            track.artists.clear();
+        }
+        if fields.contains("albumartist") {
+            track.albumartist.clear();
+        }
+        if fields.contains("album") {
+            track.album.clear();
+        }
+        if fields.contains("track") {
+            track.track = None;
+        }
+        if fields.contains("track_total") {
+            track.track_total = None;
+        }
+        if fields.contains("disc") {
+            track.disc = None;
+        }
+        if fields.contains("disc_total") {
+            track.disc_total = None;
+        }
+        if fields.contains("date") {
+            track.date.clear();
+        }
+        if fields.contains("year") {
+            track.year = None;
+        }
+        if fields.contains("genres") {
+            track.genres.clear();
+        }
+        if fields.contains("composers") {
+            track.composers.clear();
+        }
+        if fields.contains("lyricists") {
+            track.lyricists.clear();
+        }
+        if fields.contains("comment") {
+            track.comment.clear();
+        }
+        if fields.contains("bpm") {
+            track.bpm = None;
+        }
+        if fields.contains("isrc") {
+            track.isrc.clear();
+        }
+        if fields.contains("label") {
+            track.label.clear();
+        }
+        if fields.contains("catalog_number") {
+            track.catalog_number.clear();
+        }
+        if fields.contains("mb_track_id") {
+            track.mb_track_id.clear();
+        }
+        if fields.contains("mb_album_id") {
+            track.mb_album_id.clear();
+        }
+        if fields.contains("mb_artist_id") {
+            track.mb_artist_id.clear();
+        }
+        track.updated_at = now_secs();
+        match tagger::write_metadata(Path::new(&track.path), &track, &config, &extra) {
+            Ok(()) => match state.store.save(&track) {
+                Ok(()) => updated += 1,
+                Err(err) => errors.push(json!({ "id": id, "error": format!("{err:#}") })),
+            },
+            Err(err) => errors.push(json!({ "id": id, "error": format!("{err:#}") })),
+        }
+    }
+    Ok(Json(json!({ "updated": updated, "errors": errors })))
+}
+
 fn normalize_joined(value: &str, input: &[String], output: &str) -> String {
     let pieces = normalize_values(&[value.to_string()], input);
     join_values(&pieces, output)
@@ -511,28 +650,94 @@ fn image_response(bytes: Vec<u8>, mime: &str) -> Response {
     response
 }
 
-async fn stream_track(State(state): State<AppState>, AxPath(id): AxPath<u64>) -> Response {
+async fn stream_track(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<u64>,
+    headers: HeaderMap,
+) -> Response {
     let Ok(Some(track)) = state.store.get(id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let Ok(file) = tokio::fs::File::open(&track.path).await else {
+    let Ok(mut file) = tokio::fs::File::open(&track.path).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
     let mime = audio_mime(&extension(Path::new(&track.path)));
-    let stream = ReaderStream::new(file);
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| parse_byte_range(value, len));
+    let (status, start, end) = match range {
+        Some(Ok((start, end))) => (StatusCode::PARTIAL_CONTENT, start, end),
+        Some(Err(())) => {
+            let mut response = StatusCode::RANGE_NOT_SATISFIABLE.into_response();
+            let _ = response.headers_mut().insert(
+                header::CONTENT_RANGE,
+                HeaderValue::from_str(&format!("bytes */{len}")).unwrap(),
+            );
+            return response;
+        }
+        None => (StatusCode::OK, 0, len.saturating_sub(1)),
+    };
+    let length = end.saturating_sub(start).saturating_add(1);
+    if start > 0 {
+        if tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(start))
+            .await
+            .is_err()
+        {
+            return StatusCode::RANGE_NOT_SATISFIABLE.into_response();
+        }
+    }
+    let reader = tokio::io::AsyncReadExt::take(file, length);
+    let stream = ReaderStream::new(reader);
     let mut response = Response::new(Body::from_stream(stream));
+    *response.status_mut() = status;
     response
         .headers_mut()
         .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
     response.headers_mut().insert(
         header::CONTENT_LENGTH,
-        HeaderValue::from_str(&len.to_string()).unwrap(),
+        HeaderValue::from_str(&length.to_string()).unwrap(),
     );
     response
         .headers_mut()
-        .insert(header::ACCEPT_RANGES, HeaderValue::from_static("none"));
+        .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    if status == StatusCode::PARTIAL_CONTENT {
+        let _ = response.headers_mut().insert(
+            header::CONTENT_RANGE,
+            HeaderValue::from_str(&format!("bytes {start}-{end}/{len}")).unwrap(),
+        );
+    }
     response
+}
+
+fn parse_byte_range(value: &str, len: u64) -> Option<Result<(u64, u64), ()>> {
+    let value = value.strip_prefix("bytes=")?;
+    if value.contains(',') || len == 0 {
+        return Some(Err(()));
+    }
+    let (start, end) = value.split_once('-')?;
+    if start.is_empty() {
+        let suffix = end.parse::<u64>().ok()?;
+        if suffix == 0 {
+            return Some(Err(()));
+        }
+        let start = len.saturating_sub(suffix);
+        return Some(Ok((start, len - 1)));
+    }
+    let start = start.parse::<u64>().ok()?;
+    if start >= len {
+        return Some(Err(()));
+    }
+    let end = if end.is_empty() {
+        len - 1
+    } else {
+        end.parse::<u64>().ok()?.min(len - 1)
+    };
+    if end < start {
+        return Some(Err(()));
+    }
+    Some(Ok((start, end)))
 }
 
 fn audio_mime(ext: &str) -> &'static str {
